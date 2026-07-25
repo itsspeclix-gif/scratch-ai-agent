@@ -3,7 +3,6 @@ name: Scratch AI agent
 on:
   workflow_dispatch:
   schedule:
-    # Automatic hourly check. GitHub schedules may start a few minutes late.
     - cron: "17 * * * *"
 
 permissions:
@@ -17,19 +16,19 @@ jobs:
   run-agent:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     env:
       SCRATCH_USERNAME: ${{ secrets.SCRATCH_USERNAME }}
       SCRATCH_SESSION_STRING: ${{ secrets.SCRATCH_SESSION_STRING }}
       SCRATCH_PROJECT_ID: ${{ secrets.SCRATCH_PROJECT_ID }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      ALLOWED_USERS: ${{ secrets.ALLOWED_USERS }}
-      BOT_MODE: ${{ vars.BOT_MODE || 'simulate' }}
-      AUDIENCE_MODE: ${{ vars.AUDIENCE_MODE || 'allowlist' }}
+      BOT_MODE: private
+      AUDIENCE_MODE: everyone
       GROQ_MODEL: ${{ vars.GROQ_MODEL || 'llama-3.1-8b-instant' }}
       MAX_RECENT_COMMENTS: ${{ vars.MAX_RECENT_COMMENTS || '20' }}
-      MAX_REPLIES_PER_RUN: ${{ vars.MAX_REPLIES_PER_RUN || '2' }}
-      MAX_REPLY_CHARS: ${{ vars.MAX_REPLY_CHARS || '300' }}
-      MAX_THREAD_MESSAGES: ${{ vars.MAX_THREAD_MESSAGES || '8' }}
+      MAX_REPLIES_PER_RUN: ${{ vars.MAX_REPLIES_PER_RUN || '5' }}
+      MAX_REPLY_CHARS: ${{ vars.MAX_REPLY_CHARS || '500' }}
+      MAX_THREAD_MESSAGES: ${{ vars.MAX_THREAD_MESSAGES || '12' }}
       PERSONA_FILE: ${{ vars.PERSONA_FILE || 'persona.txt' }}
 
     steps:
