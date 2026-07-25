@@ -9,9 +9,9 @@ from app.policy import check_incoming, check_reply
 
 
 class ScratchClientProtocol(Protocol):
-    def recent_top_level_comments(self) -> list[CommentRef]: ...
+    def recent_conversation_targets(self) -> list[CommentRef]: ...
 
-    def has_bot_reply(self, comment: CommentRef) -> bool: ...
+    def is_current_target(self, comment: CommentRef) -> bool: ...
 
     def reply(self, comment: CommentRef, text: str) -> None: ...
 
@@ -27,9 +27,9 @@ def run_once(
     logger: logging.Logger,
 ) -> RunStats:
     stats = RunStats()
-    comments = scratch.recent_top_level_comments()
+    comments = scratch.recent_conversation_targets()
 
-    # Scratch normally returns newest first. Process oldest first for stable conversations.
+    # Scratch normally returns newest root threads first. Process oldest first.
     for comment in reversed(comments):
         stats.scanned += 1
 
@@ -49,17 +49,13 @@ def run_once(
             logger.info("skip comment=%s reason=%s", comment.id, incoming.reason)
             continue
 
-        if scratch.has_bot_reply(comment):
-            stats.skipped_existing_reply += 1
-            logger.info("skip comment=%s reason=bot already replied", comment.id)
-            continue
-
         if settings.bot_mode == "observe":
             logger.info(
-                "observe comment=%s author=%s text=%r",
+                "observe comment=%s author=%s text=%r thread_messages=%d",
                 comment.id,
                 comment.author,
                 comment.content,
+                len(comment.thread),
             )
             continue
 
@@ -94,11 +90,11 @@ def run_once(
                 )
                 continue
 
-            # Recheck immediately before posting. This closes the duplicate-reply race if
-            # another process answered after the first check.
-            if scratch.has_bot_reply(comment):
+            # Recheck immediately before posting. A new user or bot reply may have appeared
+            # while Groq was generating the response.
+            if not scratch.is_current_target(comment):
                 stats.skipped_existing_reply += 1
-                logger.info("skip comment=%s reason=reply appeared before post", comment.id)
+                logger.info("skip comment=%s reason=thread changed before post", comment.id)
                 continue
 
             scratch.reply(comment, decision.reply)

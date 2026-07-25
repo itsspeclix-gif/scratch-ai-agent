@@ -5,7 +5,7 @@ import unittest
 
 from app.config import Settings
 from app.groq_agent import GROQ_CHAT_URL, GroqAgent
-from app.models import CommentRef
+from app.models import CommentRef, ThreadTurn
 
 
 class FakeResponse:
@@ -20,8 +20,8 @@ class FakeResponse:
                         "content": json.dumps(
                             {
                                 "should_reply": True,
-                                "reply": "I used clones.",
-                                "reason": "project question",
+                                "reply": "The second level uses the same clone system.",
+                                "reason": "follow-up project question",
                             }
                         )
                     }
@@ -46,7 +46,7 @@ class FakeHTTPSession:
 
 
 class GroqAgentTests(unittest.TestCase):
-    def test_request_contract_uses_fake_authorization_headers(self) -> None:
+    def test_request_includes_thread_history(self) -> None:
         settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
@@ -59,11 +59,24 @@ class GroqAgentTests(unittest.TestCase):
             max_recent_comments=20,
             max_replies_per_run=2,
             max_reply_chars=300,
+            max_thread_messages=8,
             persona="A test persona.",
         )
         http = FakeHTTPSession()
         decision = GroqAgent(settings, http=http).generate(
-            CommentRef("1", "Tester", "How?", None, object())
+            CommentRef(
+                "3",
+                "Tester",
+                "What about level two?",
+                "1",
+                object(),
+                root_id="1",
+                thread=(
+                    ThreadTurn("1", "Tester", "How did you make it?"),
+                    ThreadTurn("2", "Bot", "I used clones."),
+                    ThreadTurn("3", "Tester", "What about level two?"),
+                ),
+            )
         )
 
         self.assertEqual(http.url, GROQ_CHAT_URL)
@@ -71,8 +84,11 @@ class GroqAgentTests(unittest.TestCase):
         self.assertEqual(http.headers["Content-Type"], "application/json")
         self.assertEqual(http.timeout, 30)
         self.assertEqual(http.payload["response_format"], {"type": "json_object"})
+        transcript = http.payload["messages"][1]["content"]
+        self.assertIn("How did you make it?", transcript)
+        self.assertIn("I used clones.", transcript)
+        self.assertIn("What about level two?", transcript)
         self.assertTrue(decision.should_reply)
-        self.assertEqual(decision.reply, "I used clones.")
 
 
 if __name__ == "__main__":

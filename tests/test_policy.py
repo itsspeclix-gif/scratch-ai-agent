@@ -7,8 +7,8 @@ from app.policy import check_incoming, check_reply
 
 
 class PolicyTests(unittest.TestCase):
-    def test_allowlisted_top_level_comment_is_allowed(self) -> None:
-        comment = CommentRef("1", "Tester", "How does this work?", None, object())
+    def test_allowlisted_reply_comment_is_allowed(self) -> None:
+        comment = CommentRef("2", "Tester", "What about clones?", "1", object())
         self.assertTrue(check_incoming(comment, "allowlist", frozenset({"tester"})).allowed)
 
     def test_non_allowlisted_comment_is_rejected(self) -> None:

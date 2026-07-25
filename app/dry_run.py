@@ -3,41 +3,45 @@ from __future__ import annotations
 import logging
 
 from app.config import Settings
-from app.models import AgentDecision, CommentRef
+from app.models import AgentDecision, CommentRef, ThreadTurn
 from app.runner import run_once
-
-
-class FakeComment:
-    def __init__(self, replies: list[str] | None = None) -> None:
-        self._replies = replies or []
-
-    def replies(self) -> list[object]:
-        return [type("Reply", (), {"author_name": name})() for name in self._replies]
 
 
 class FakeScratch:
     def __init__(self) -> None:
         self.posted: list[tuple[str, str]] = []
+        self._active = {"3"}
         self._comments = [
-            CommentRef("1", "Tester", "How did you make the movement smooth?", None, FakeComment()),
-            CommentRef("2", "SomeoneElse", "Hello", None, FakeComment()),
-            CommentRef("3", "Tester", "Already answered", None, FakeComment(["BotAccount"])),
+            CommentRef(
+                "3",
+                "Tester",
+                "Does the same method work for level two?",
+                "1",
+                object(),
+                root_id="1",
+                thread=(
+                    ThreadTurn("1", "Tester", "How did you make the movement smooth?"),
+                    ThreadTurn("2", "BotAccount", "I used small position changes in a loop."),
+                    ThreadTurn("3", "Tester", "Does the same method work for level two?"),
+                ),
+            ),
+            CommentRef("4", "SomeoneElse", "Hello", None, object(), root_id="4"),
         ]
 
-    def recent_top_level_comments(self) -> list[CommentRef]:
-        return self._comments
+    def recent_conversation_targets(self) -> list[CommentRef]:
+        return [comment for comment in self._comments if comment.id in self._active or comment.id == "4"]
 
-    def has_bot_reply(self, comment: CommentRef) -> bool:
-        return any(reply.author_name.casefold() == "botaccount" for reply in comment.raw.replies())
+    def is_current_target(self, comment: CommentRef) -> bool:
+        return comment.id in self._active
 
     def reply(self, comment: CommentRef, text: str) -> None:
         self.posted.append((comment.id, text))
-        comment.raw._replies.append("BotAccount")
+        self._active.remove(comment.id)
 
 
 class FakeAgent:
     def generate(self, comment: CommentRef) -> AgentDecision:
-        return AgentDecision(True, "I used small position changes in a fast loop.", "project question")
+        return AgentDecision(True, "Yes. I reuse the same clone movement and change the level data.", "follow-up")
 
 
 def main() -> None:
@@ -48,20 +52,23 @@ def main() -> None:
         groq_api_key="fake-groq-key",
         groq_model="llama-3.1-8b-instant",
         allowed_users=frozenset({"tester"}),
+        audience_mode="allowlist",
         bot_mode="private",
         max_recent_comments=20,
         max_replies_per_run=2,
         max_reply_chars=300,
+        max_thread_messages=8,
         persona="A transparent experimental AI Scratch creator.",
     )
     scratch = FakeScratch()
     stats = run_once(settings, scratch, FakeAgent(), logging.getLogger("dry-run"))
 
-    assert scratch.posted == [("1", "I used small position changes in a fast loop.")]
+    assert scratch.posted == [
+        ("3", "Yes. I reuse the same clone movement and change the level data.")
+    ]
     assert stats.posted == 1
     assert stats.skipped_not_allowed_user == 1
-    assert stats.skipped_existing_reply == 1
-    print("Dry run passed: allowlist, duplicate prevention, policy path, and posting path work with fake services.")
+    print("Dry run passed: threaded follow-up, allowlist, policy, and posting paths work with fake services.")
 
 
 if __name__ == "__main__":

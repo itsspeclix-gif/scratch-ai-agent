@@ -4,29 +4,26 @@ import logging
 import unittest
 
 from app.config import Settings
-from app.models import AgentDecision, CommentRef
+from app.models import AgentDecision, CommentRef, ThreadTurn
 from app.runner import run_once
-
-
-class FakeRaw:
-    def __init__(self, bot_replied: bool = False) -> None:
-        self.bot_replied = bot_replied
 
 
 class FakeScratch:
     def __init__(self, comments: list[CommentRef]) -> None:
         self.comments = comments
-        self.posted: list[str] = []
+        self.current_ids = {comment.id for comment in comments}
+        self.force_stale = False
+        self.posted: list[tuple[str, str]] = []
 
-    def recent_top_level_comments(self) -> list[CommentRef]:
-        return self.comments
+    def recent_conversation_targets(self) -> list[CommentRef]:
+        return [comment for comment in self.comments if comment.id in self.current_ids]
 
-    def has_bot_reply(self, comment: CommentRef) -> bool:
-        return comment.raw.bot_replied
+    def is_current_target(self, comment: CommentRef) -> bool:
+        return not self.force_stale and comment.id in self.current_ids
 
     def reply(self, comment: CommentRef, text: str) -> None:
-        self.posted.append(text)
-        comment.raw.bot_replied = True
+        self.posted.append((comment.id, text))
+        self.current_ids.remove(comment.id)
 
 
 class FakeAgent:
@@ -48,11 +45,24 @@ class RunnerTests(unittest.TestCase):
             max_recent_comments=20,
             max_replies_per_run=2,
             max_reply_chars=300,
+            max_thread_messages=8,
             persona="Test",
         )
 
-    def test_posts_once_and_then_detects_existing_reply(self) -> None:
-        comment = CommentRef("1", "Tester", "Hello", None, FakeRaw())
+    def test_posts_latest_followup_once(self) -> None:
+        comment = CommentRef(
+            "3",
+            "Tester",
+            "What about the second level?",
+            "1",
+            object(),
+            root_id="1",
+            thread=(
+                ThreadTurn("1", "Tester", "How did you make it?"),
+                ThreadTurn("2", "Bot", "I used clones."),
+                ThreadTurn("3", "Tester", "What about the second level?"),
+            ),
+        )
         scratch = FakeScratch([comment])
 
         first = run_once(self.settings, scratch, FakeAgent(), logging.getLogger("test"))
@@ -60,8 +70,18 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(first.posted, 1)
         self.assertEqual(second.posted, 0)
-        self.assertEqual(second.skipped_existing_reply, 1)
-        self.assertEqual(scratch.posted, ["Safe response."])
+        self.assertEqual(scratch.posted, [("3", "Safe response.")])
+
+    def test_recheck_blocks_post_when_thread_changes(self) -> None:
+        comment = CommentRef("1", "Tester", "Hello", None, object(), root_id="1")
+        scratch = FakeScratch([comment])
+        scratch.force_stale = True
+
+        stats = run_once(self.settings, scratch, FakeAgent(), logging.getLogger("test"))
+
+        self.assertEqual(stats.posted, 0)
+        self.assertEqual(stats.skipped_existing_reply, 1)
+        self.assertEqual(scratch.posted, [])
 
 
 if __name__ == "__main__":

@@ -1,22 +1,80 @@
-# Scratch AI Agent — Version 1
+# Scratch AI Agent — Version 1.2
 
-This starter project checks one Scratch project's top-level comments, sends eligible comments to a Groq-hosted Llama model, and replies only to allowlisted test accounts.
+This project runs a Groq-hosted Llama model as a supervised Scratch account agent. It checks one Scratch project's comment threads, reads recent conversation context, and can reply to the newest unanswered user message.
 
-It uses three modes:
+## Operating modes
 
-- `observe`: reads and logs comments; does not call Groq or post.
-- `simulate`: generates a reply and logs it; does not post.
-- `private`: posts only to usernames listed in `ALLOWED_USERS`.
+- `observe`: reads and logs eligible comments; does not call Groq or post.
+- `simulate`: generates and logs proposed replies; does not post.
+- `private`: posts replies. The audience is controlled separately by `AUDIENCE_MODE`.
 
-There is no public mode in Version 1.
+Audience modes:
 
-## Why it does not need a database
+- `AUDIENCE_MODE=allowlist`: only usernames in `ALLOWED_USERS` are eligible.
+- `AUDIENCE_MODE=everyone`: any Scratch user is eligible.
 
-GitHub Actions starts from a clean machine on every run. To prevent duplicate replies, the agent checks the Scratch comment thread itself. If the bot account has already replied to a top-level comment, that comment is skipped. The workflow also uses a GitHub Actions concurrency group so two runs cannot overlap.
+## Automatic GitHub replies
 
-## 1. Install locally
+The GitHub Actions workflow runs once per hour at minute 17 and can also be run manually. Automatic posting requires these repository variables:
 
-Install Python 3.12, open Terminal in this folder, and run:
+```text
+BOT_MODE=private
+AUDIENCE_MODE=everyone
+```
+
+With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub schedules can begin a few minutes late.
+
+## Threaded conversations
+
+Version 1.2 supports follow-up replies in the same Scratch comment thread.
+
+For each top-level thread, the agent:
+
+1. Reads the root comment and its replies.
+2. Finds the newest comment not written by the bot.
+3. Skips the thread when the bot has already replied after that comment.
+4. Sends recent thread history to Groq.
+5. Replies directly to the newest user comment.
+
+Scratch displays replies under one top-level comment rather than as deeply nested branches. The agent therefore treats each top-level comment and all its replies as one ordered conversation.
+
+## Personality
+
+The account personality is stored in `persona.txt`. Edit that file and push the change to GitHub. No API key or GitHub variable is needed for personality changes.
+
+The default persona defines:
+
+- identity and disclosure behavior
+- interests
+- writing voice
+- conversational behavior
+
+Avoid putting secrets or private information in `persona.txt` because it is committed to the repository.
+
+## Configurable limits
+
+These may be added under `Settings → Secrets and variables → Actions → Variables`:
+
+- `MAX_RECENT_COMMENTS=20`: number of recent top-level threads scanned per run.
+- `MAX_REPLIES_PER_RUN=2`: maximum generated or posted replies per run.
+- `MAX_REPLY_CHARS=300`: maximum generated reply length.
+- `MAX_THREAD_MESSAGES=8`: number of recent messages supplied to Groq for one thread.
+- `GROQ_MODEL=llama-3.1-8b-instant`: Groq model.
+
+If a variable is absent, the workflow uses the default shown above.
+
+## Required GitHub secrets
+
+- `SCRATCH_USERNAME`
+- `SCRATCH_SESSION_STRING`
+- `SCRATCH_PROJECT_ID`
+- `GROQ_API_KEY`
+
+`ALLOWED_USERS` is required only when `AUDIENCE_MODE=allowlist`.
+
+## Local verification
+
+From the project folder:
 
 ```bash
 make -n check
@@ -24,29 +82,7 @@ make check
 make dry-run
 ```
 
-The first real command automatically creates `.venv` and installs the required packages. Later commands reuse that environment. `make -n check` previews the bootstrap and test commands without changing anything. `make dry-run` uses fake Scratch objects, a fake AI response, and no network access.
-
-## 2. Create the Scratch session secret
-
-Run:
-
-```bash
-make session
-```
-
-Enter the bot account username and password. The password is hidden while you type. Copy the generated session string. Treat it exactly like a password.
-
-Do not put the Scratch password, session string, or Groq key into any project file.
-
-## 3. Test locally in simulation mode
-
-Copy the example configuration:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`, then load it and run one check:
+Then load `.env` and run one real check:
 
 ```bash
 set -a
@@ -55,79 +91,23 @@ set +a
 make run
 ```
 
-Use `BOT_MODE=simulate` first. Add a top-level comment to the selected Scratch project from the allowlisted testing account. The proposed reply will appear in Terminal, but nothing will be posted.
+Use `BOT_MODE=simulate` before changing to `private`.
 
-## 4. Put it on GitHub Actions
+## Duplicate prevention
 
-Create a private GitHub repository and upload this project. In the repository, open:
+GitHub Actions starts from a clean machine on each run, so the bot does not rely on a local database. It uses the Scratch thread itself as the source of truth. Immediately before posting, it reloads the thread and confirms that the same user comment is still the newest unanswered target.
 
-`Settings → Secrets and variables → Actions`
+## Scope
 
-Create these repository secrets:
-
-- `SCRATCH_USERNAME`
-- `SCRATCH_SESSION_STRING`
-- `SCRATCH_PROJECT_ID`
-- `GROQ_API_KEY`
-- `ALLOWED_USERS`
-
-`ALLOWED_USERS` is a comma-separated list, for example:
-
-```text
-MyTestAccount,MySecondTestAccount
-```
-
-Create these repository variables:
-
-- `BOT_MODE` = `simulate`
-- `GROQ_MODEL` = `llama-3.1-8b-instant`
-
-Then open `Actions → Scratch AI agent → Run workflow`.
-
-## 5. Enable one-to-one posting
-
-After the simulation output is correct, change the GitHub repository variable:
-
-```text
-BOT_MODE=private
-```
-
-The workflow runs once per hour and can reply only to allowlisted accounts. All other users are ignored. You can also run it manually at any time from the Actions page.
-
-## Scope of Version 1
-
-Version 1 intentionally supports only:
+Version 1.2 supports:
 
 - one Scratch project
-- top-level comments
-- one short reply per top-level comment
-- allowlisted testers
-- a maximum of two generated or posted replies per run
+- any audience or an allowlist
+- top-level comments and follow-up replies
+- short conversation context
+- hourly GitHub execution
+- editable account personality
 
-It does not follow users, post on profiles, join studios, create projects, handle nested conversations, or initiate conversations.
+It does not initiate conversations, follow users, post on profiles, join studios, create projects, or maintain long-term memory across separate Scratch threads.
 
-## Important limitation
-
-`scratchattach` is an unofficial Scratch API wrapper. Scratch may change its site behavior and break the integration. The Scratch-specific code is isolated in `app/scratch_client.py` so it can be repaired without changing the AI and policy logic.
-
-## Troubleshooting: `ModuleNotFoundError`
-
-All project commands use the Python interpreter inside `.venv`. If `.venv` does not exist, the current Makefile creates it and installs the dependencies automatically. Run:
-
-```bash
-make check
-make dry-run
-```
-
-A successful check ends with `Ran 7 tests` and `OK`.
-
-## Public audience and GitHub variables
-
-Version 1.1.0 supports two audience modes:
-
-- `AUDIENCE_MODE=allowlist`: only usernames in the comma-separated `ALLOWED_USERS` secret are handled.
-- `AUDIENCE_MODE=everyone`: comments from any Scratch user are eligible. `ALLOWED_USERS` may be empty.
-
-For GitHub Actions, add `AUDIENCE_MODE`, `MAX_RECENT_COMMENTS`, `MAX_REPLIES_PER_RUN`, and `MAX_REPLY_CHARS` under **Settings → Secrets and variables → Actions → Variables**. `PERSONA_FILE` does not need to be added because the workflow defaults to `persona.txt`.
-
-This version still processes top-level project comments only. Threaded follow-up replies require a separate conversation-thread update.
+`scratchattach` is an unofficial Scratch API wrapper. Scratch may change its site behavior and break the integration. Scratch-specific code remains isolated in `app/scratch_client.py`.

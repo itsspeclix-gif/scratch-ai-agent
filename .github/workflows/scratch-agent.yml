@@ -3,9 +3,8 @@ name: Scratch AI agent
 on:
   workflow_dispatch:
   schedule:
-    # Once per hour to keep private-repository Actions usage low during testing.
-    # You can still run it manually at any time from the Actions page.
-    - cron: "7 * * * *"
+    # Automatic hourly check. GitHub schedules may start a few minutes late.
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -30,6 +29,7 @@ jobs:
       MAX_RECENT_COMMENTS: ${{ vars.MAX_RECENT_COMMENTS || '20' }}
       MAX_REPLIES_PER_RUN: ${{ vars.MAX_REPLIES_PER_RUN || '2' }}
       MAX_REPLY_CHARS: ${{ vars.MAX_REPLY_CHARS || '300' }}
+      MAX_THREAD_MESSAGES: ${{ vars.MAX_THREAD_MESSAGES || '8' }}
       PERSONA_FILE: ${{ vars.PERSONA_FILE || 'persona.txt' }}
 
     steps:

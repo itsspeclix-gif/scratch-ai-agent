@@ -1,18 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 @dataclass(frozen=True)
+class ThreadTurn:
+    id: str
+    author: str
+    content: str
+
+
+@dataclass(frozen=True)
 class CommentRef:
-    """A Scratch comment plus its underlying scratchattach object."""
+    """The latest unanswered Scratch comment in one conversation thread."""
 
     id: str
     author: str
     content: str
     parent_id: str | None
     raw: Any
+    root_id: str | None = None
+    thread: tuple[ThreadTurn, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

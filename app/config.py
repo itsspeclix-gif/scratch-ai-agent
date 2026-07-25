@@ -40,6 +40,7 @@ class Settings:
     max_recent_comments: int
     max_replies_per_run: int
     max_reply_chars: int
+    max_thread_messages: int
     persona: str
 
     @classmethod
@@ -89,5 +90,6 @@ class Settings:
             max_recent_comments=_positive_int("MAX_RECENT_COMMENTS", 20),
             max_replies_per_run=_positive_int("MAX_REPLIES_PER_RUN", 2),
             max_reply_chars=_positive_int("MAX_REPLY_CHARS", 300),
+            max_thread_messages=_positive_int("MAX_THREAD_MESSAGES", 8),
             persona=persona,
         )
