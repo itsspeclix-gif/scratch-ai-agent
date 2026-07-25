@@ -54,6 +54,7 @@ class GroqAgentTests(unittest.TestCase):
             groq_api_key="fake-key",
             groq_model="llama-3.1-8b-instant",
             allowed_users=frozenset({"tester"}),
+            audience_mode="allowlist",
             bot_mode="simulate",
             max_recent_comments=20,
             max_replies_per_run=2,

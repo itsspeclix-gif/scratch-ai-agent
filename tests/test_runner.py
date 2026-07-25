@@ -43,6 +43,7 @@ class RunnerTests(unittest.TestCase):
             groq_api_key="fake",
             groq_model="llama-3.1-8b-instant",
             allowed_users=frozenset({"tester"}),
+            audience_mode="allowlist",
             bot_mode="private",
             max_recent_comments=20,
             max_replies_per_run=2,

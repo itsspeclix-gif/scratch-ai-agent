@@ -24,7 +24,7 @@ make check
 make dry-run
 ```
 
-The first real command automatically creates `.venv` and installs the required packages. The `.venv` directory is created locally and is intentionally not included in the downloaded ZIP. Later commands reuse that environment. `make -n check` previews the bootstrap and test commands without changing anything. `make dry-run` uses fake Scratch objects, a fake AI response, and no network access.
+The first real command automatically creates `.venv` and installs the required packages. Later commands reuse that environment. `make -n check` previews the bootstrap and test commands without changing anything. `make dry-run` uses fake Scratch objects, a fake AI response, and no network access.
 
 ## 2. Create the Scratch session secret
 
@@ -120,3 +120,14 @@ make dry-run
 ```
 
 A successful check ends with `Ran 7 tests` and `OK`.
+
+## Public audience and GitHub variables
+
+Version 1.1.0 supports two audience modes:
+
+- `AUDIENCE_MODE=allowlist`: only usernames in the comma-separated `ALLOWED_USERS` secret are handled.
+- `AUDIENCE_MODE=everyone`: comments from any Scratch user are eligible. `ALLOWED_USERS` may be empty.
+
+For GitHub Actions, add `AUDIENCE_MODE`, `MAX_RECENT_COMMENTS`, `MAX_REPLIES_PER_RUN`, and `MAX_REPLY_CHARS` under **Settings → Secrets and variables → Actions → Variables**. `PERSONA_FILE` does not need to be added because the workflow defaults to `persona.txt`.
+
+This version still processes top-level project comments only. Threaded follow-up replies require a separate conversation-thread update.

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 BotMode = Literal["observe", "simulate", "private"]
+AudienceMode = Literal["allowlist", "everyone"]
 
 
 def _required(name: str) -> str:
@@ -34,6 +35,7 @@ class Settings:
     groq_api_key: str
     groq_model: str
     allowed_users: frozenset[str]
+    audience_mode: AudienceMode
     bot_mode: BotMode
     max_recent_comments: int
     max_replies_per_run: int
@@ -47,13 +49,21 @@ class Settings:
             raise ValueError("BOT_MODE must be observe, simulate, or private")
         mode: BotMode = mode_raw  # type: ignore[assignment]
 
+        audience_raw = os.getenv("AUDIENCE_MODE", "allowlist").strip().lower()
+        if audience_raw not in {"allowlist", "everyone"}:
+            raise ValueError("AUDIENCE_MODE must be allowlist or everyone")
+        audience_mode: AudienceMode = audience_raw  # type: ignore[assignment]
+
         allowed_users = frozenset(
             username.strip().casefold()
-            for username in _required("ALLOWED_USERS").split(",")
+            for username in os.getenv("ALLOWED_USERS", "").split(",")
             if username.strip()
         )
-        if not allowed_users:
-            raise ValueError("ALLOWED_USERS must contain at least one Scratch username")
+        if audience_mode == "allowlist" and not allowed_users:
+            raise ValueError(
+                "ALLOWED_USERS must contain at least one Scratch username "
+                "when AUDIENCE_MODE=allowlist"
+            )
 
         persona_path = Path(os.getenv("PERSONA_FILE", "persona.txt"))
         try:
@@ -74,6 +84,7 @@ class Settings:
             groq_api_key=groq_key,
             groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip(),
             allowed_users=allowed_users,
+            audience_mode=audience_mode,
             bot_mode=mode,
             max_recent_comments=_positive_int("MAX_RECENT_COMMENTS", 20),
             max_replies_per_run=_positive_int("MAX_REPLIES_PER_RUN", 2),

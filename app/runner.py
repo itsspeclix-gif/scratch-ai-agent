@@ -33,9 +33,16 @@ def run_once(
     for comment in reversed(comments):
         stats.scanned += 1
 
-        incoming = check_incoming(comment, settings.allowed_users)
+        incoming = check_incoming(
+            comment,
+            settings.audience_mode,
+            settings.allowed_users,
+        )
         if not incoming.allowed:
-            if comment.author.casefold() not in settings.allowed_users:
+            if (
+                settings.audience_mode == "allowlist"
+                and comment.author.casefold() not in settings.allowed_users
+            ):
                 stats.skipped_not_allowed_user += 1
             else:
                 stats.skipped_policy += 1

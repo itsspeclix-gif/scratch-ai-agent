@@ -21,8 +21,12 @@ SEVERE_CONTENT_RE = re.compile(
 )
 
 
-def check_incoming(comment: CommentRef, allowed_users: frozenset[str]) -> PolicyResult:
-    if comment.author.casefold() not in allowed_users:
+def check_incoming(
+    comment: CommentRef,
+    audience_mode: str,
+    allowed_users: frozenset[str],
+) -> PolicyResult:
+    if audience_mode == "allowlist" and comment.author.casefold() not in allowed_users:
         return PolicyResult(False, "author is not allowlisted")
     if comment.parent_id is not None:
         return PolicyResult(False, "only top-level comments are handled in version 1")
