@@ -1,0 +1,1 @@
+"""Scratch AI agent package."""

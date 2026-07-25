@@ -1,0 +1,2 @@
+requests>=2.32,<3
+scratchattach>=2.1.6,<3.1
