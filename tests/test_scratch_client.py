@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 import unittest
-from contextlib import contextmanager
 from unittest.mock import patch
 
 from app.config import Settings
@@ -129,26 +129,34 @@ class ScratchClientThreadTests(unittest.TestCase):
         self.assertEqual([turn.id for turn in target.thread], ["1", "2", "3", "4"])
         self.assertEqual(root.reply_offsets, [0, 2])
 
-    def test_profile_reply_uses_profile_html_response_handler(self) -> None:
+    def test_profile_reply_accepts_success_html_with_wrapped_attributes(self) -> None:
         events: list[str] = []
 
-        @contextmanager
-        def profile_response_handler():
-            events.append("enter")
-            yield
-            events.append("exit")
-
         class RawProfileComment:
-            def reply(self, text: str, *, commentee_id: int) -> None:
-                events.append(f"reply:{text}:to:{commentee_id}")
+            author_id = None
 
         class ProfileAuthor:
             id = 42
 
         class FakeSession:
+            _headers = {"X-Token": "token"}
+            _cookies = {"scratchsessionsid": "session"}
+
             def connect_user(self, username: str) -> ProfileAuthor:
                 events.append(f"resolve:{username}")
                 return ProfileAuthor()
+
+        class SuccessfulResponse:
+            status_code = 200
+            text = """
+                <div id="comments-55" class="comment featured"
+                     data-comment-id="55">
+                  <a
+                    href="/users/Bot"
+                    data-comment-user="Bot">
+                  </a>
+                </div>
+            """
 
         self.client._session = FakeSession()
         self.client._profile_user_ids = {}
@@ -165,21 +173,63 @@ class ScratchClientThreadTests(unittest.TestCase):
         )
 
         with patch(
-            "scratchattach.utils.requests.requests.no_error_handling",
-            side_effect=profile_response_handler,
-        ) as no_error_handling:
+            "app.scratch_client.requests.post",
+            return_value=SuccessfulResponse(),
+        ) as post:
             self.client.reply(comment, "Profile response")
 
-        no_error_handling.assert_called_once_with()
+        self.assertEqual(events, ["resolve:User"])
+        post.assert_called_once()
+        url = post.call_args.args[0]
+        kwargs = post.call_args.kwargs
         self.assertEqual(
-            events,
-            [
-                "resolve:User",
-                "enter",
-                "reply:Profile response:to:42",
-                "exit",
-            ],
+            url,
+            "https://scratch.mit.edu/site-api/comments/user/Bot/add/",
         )
+        self.assertEqual(kwargs["headers"]["X-Token"], "token")
+        self.assertEqual(kwargs["headers"]["Referer"], "https://scratch.mit.edu/users/Bot/")
+        self.assertEqual(kwargs["cookies"], {"scratchsessionsid": "session"})
+        self.assertEqual(kwargs["timeout"], 30)
+        self.assertEqual(
+            json.loads(kwargs["data"]),
+            {
+                "commentee_id": 42,
+                "content": "Profile response",
+                "parent_id": "10",
+            },
+        )
+
+    def test_profile_reply_rejects_success_status_without_created_comment(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class RejectedResponse:
+            status_code = 200
+            text = '<script id="error-data">{"error": "isFlood"}</script>'
+
+        self.client._session = FakeSession()
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=RejectedResponse(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "isFlood"):
+                self.client.reply(comment, "Profile response")
 
     def test_project_reply_keeps_standard_response_handling(self) -> None:
         raw = FakeComment(10, "User", "Hello")

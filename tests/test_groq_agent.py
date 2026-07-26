@@ -19,7 +19,6 @@ class FakeResponse:
                     "message": {
                         "content": json.dumps(
                             {
-                                "should_reply": True,
                                 "reply": "The second level uses the same clone system.",
                                 "reason": "follow-up project question",
                             }
@@ -80,6 +79,10 @@ class GroqAgentTests(unittest.TestCase):
         self.assertEqual(http.headers["Content-Type"], "application/json")
         self.assertEqual(http.timeout, 30)
         self.assertEqual(http.payload["response_format"], {"type": "json_object"})
+        system_prompt = http.payload["messages"][0]["content"]
+        self.assertIn("Always respond to every supplied message", system_prompt)
+        self.assertIn("off-topic messages", system_prompt)
+        self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn("How did you make it?", transcript)
         self.assertIn("I used clones.", transcript)

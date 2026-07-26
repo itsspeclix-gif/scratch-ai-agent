@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+import json
 import logging
 import warnings
+from html.parser import HTMLParser
 from typing import Any
+
+import requests
 
 from app.config import Settings
 from app.models import CommentRef, ThreadTurn
 
 PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
+
+
+class _ProfilePostParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.created_comment_id: str | None = None
+        self._reading_error_data = False
+        self.error_data = ""
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        attributes = dict(attrs)
+        classes = (attributes.get("class") or "").split()
+        if tag == "div" and "comment" in classes:
+            comment_id = attributes.get("data-comment-id")
+            if comment_id:
+                self.created_comment_id = comment_id
+        if tag == "script" and attributes.get("id") == "error-data":
+            self._reading_error_data = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._reading_error_data = False
+
+    def handle_data(self, data: str) -> None:
+        if self._reading_error_data:
+            self.error_data += data
 
 
 class ScratchClient:
@@ -258,15 +292,73 @@ class ScratchClient:
             self._profile_user_ids[username_key] = author_id
         return self._profile_user_ids[username_key]
 
+    def _post_profile_reply(
+        self,
+        comment: CommentRef,
+        text: str,
+        commentee_id: Any,
+    ) -> None:
+        profile_username = comment.source_id or self._settings.scratch_username
+        parent_id = comment.root_id or comment.parent_id or comment.id
+        url = (
+            "https://scratch.mit.edu/site-api/comments/user/"
+            f"{profile_username}/add/"
+        )
+        headers = dict(getattr(self._session, "_headers", {}))
+        headers["Referer"] = f"https://scratch.mit.edu/users/{profile_username}/"
+        response = requests.post(
+            url,
+            headers=headers,
+            cookies=getattr(self._session, "_cookies", {}),
+            data=json.dumps(
+                {
+                    "commentee_id": commentee_id,
+                    "content": text,
+                    "parent_id": parent_id,
+                }
+            ),
+            timeout=30,
+        )
+
+        if response.status_code == 429:
+            raise RuntimeError("Scratch rate-limited the profile reply")
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(
+                "Scratch rejected the profile reply "
+                f"(HTTP {response.status_code})"
+            )
+
+        parser = _ProfilePostParser()
+        parser.feed(response.text)
+        if parser.created_comment_id is not None:
+            logger.info(
+                "profile reply accepted created_comment=%s parent=%s",
+                parser.created_comment_id,
+                parent_id,
+            )
+            return
+
+        error_message = ""
+        if parser.error_data.strip():
+            try:
+                error_body = json.loads(parser.error_data)
+            except json.JSONDecodeError:
+                error_message = parser.error_data.strip()
+            else:
+                if isinstance(error_body, dict):
+                    error_message = str(
+                        error_body.get("message")
+                        or error_body.get("error")
+                        or error_body
+                    )
+        if not error_message:
+            error_message = "Scratch returned no created comment"
+        raise RuntimeError(f"Profile reply was not accepted: {error_message[:200]}")
+
     def reply(self, comment: CommentRef, text: str) -> None:
         if comment.source == "profile":
-            # scratchattach's profile endpoint returns HTML, but its shared response
-            # checker tries to decode every successful response as JSON first.
-            from scratchattach.utils.requests import requests as scratch_requests
-
             commentee_id = self._profile_commentee_id(comment)
-            with scratch_requests.no_error_handling():
-                comment.raw.reply(text, commentee_id=commentee_id)
+            self._post_profile_reply(comment, text, commentee_id)
             return
 
         # scratchattach sets the correct root parent and commentee for project roots
