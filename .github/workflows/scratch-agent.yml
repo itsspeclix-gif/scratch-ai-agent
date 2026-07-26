@@ -15,7 +15,7 @@ concurrency:
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     env:
       SCRATCH_USERNAME: ${{ secrets.SCRATCH_USERNAME }}
