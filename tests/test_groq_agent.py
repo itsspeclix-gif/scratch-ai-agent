@@ -50,16 +50,12 @@ class GroqAgentTests(unittest.TestCase):
         settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
-            scratch_project_id="123",
             groq_api_key="fake-key",
             groq_model="llama-3.1-8b-instant",
             allowed_users=frozenset({"tester"}),
             audience_mode="allowlist",
             bot_mode="simulate",
-            max_recent_comments=20,
-            max_replies_per_run=2,
             max_reply_chars=300,
-            max_thread_messages=8,
             persona="A test persona.",
         )
         http = FakeHTTPSession()

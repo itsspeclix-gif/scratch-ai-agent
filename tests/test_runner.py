@@ -15,7 +15,7 @@ class FakeScratch:
         self.force_stale = False
         self.posted: list[tuple[str, str]] = []
 
-    def recent_conversation_targets(self) -> list[CommentRef]:
+    def conversation_targets(self) -> list[CommentRef]:
         return [comment for comment in self.comments if comment.id in self.current_ids]
 
     def is_current_target(self, comment: CommentRef) -> bool:
@@ -36,16 +36,12 @@ class RunnerTests(unittest.TestCase):
         self.settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
-            scratch_project_id="123",
             groq_api_key="fake",
             groq_model="llama-3.1-8b-instant",
             allowed_users=frozenset({"tester"}),
             audience_mode="allowlist",
             bot_mode="private",
-            max_recent_comments=20,
-            max_replies_per_run=2,
             max_reply_chars=300,
-            max_thread_messages=8,
             persona="Test",
         )
 
@@ -82,6 +78,30 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(stats.posted, 0)
         self.assertEqual(stats.skipped_existing_reply, 1)
         self.assertEqual(scratch.posted, [])
+
+    def test_posts_every_eligible_target_without_a_run_cap(self) -> None:
+        comments = [
+            CommentRef(
+                str(comment_id),
+                "Tester",
+                f"Comment {comment_id}",
+                None,
+                object(),
+                root_id=str(comment_id),
+            )
+            for comment_id in range(1, 8)
+        ]
+        scratch = FakeScratch(comments)
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.posted, 7)
+        self.assertEqual(len(scratch.posted), 7)
 
 
 if __name__ == "__main__":

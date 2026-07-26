@@ -1,6 +1,6 @@
-# Scratch AI Agent — Version 1.2
+# Scratch AI Agent - Version 2.0
 
-This project runs a Groq-hosted Llama model as a supervised Scratch account agent. It checks one Scratch project's comment threads, reads recent conversation context, and can reply to the newest unanswered user message.
+This project runs a Groq-hosted Llama model as a supervised Scratch account agent. It checks the account profile and every shared project, reads complete conversation threads, and can reply to each unanswered user message.
 
 ## Operating modes
 
@@ -24,16 +24,16 @@ AUDIENCE_MODE=everyone
 
 With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub schedules can begin a few minutes late.
 
-## Threaded conversations
+## Account-wide conversations
 
-Version 1.2 supports follow-up replies in the same Scratch comment thread.
+Version 2.0 discovers every shared project owned by `SCRATCH_USERNAME` automatically. It also checks comments on the account profile, so no project ID or project allowlist is required.
 
 For each top-level thread, the agent:
 
-1. Reads the root comment and its replies.
+1. Reads the root comment and every page of its replies.
 2. Finds the newest comment not written by the bot.
 3. Skips the thread when the bot has already replied after that comment.
-4. Sends recent thread history to Groq.
+4. Sends the complete thread history to Groq.
 5. Replies directly to the newest user comment.
 
 Scratch displays replies under one top-level comment rather than as deeply nested branches. The agent therefore treats each top-level comment and all its replies as one ordered conversation.
@@ -51,23 +51,19 @@ The default persona defines:
 
 Avoid putting secrets or private information in `persona.txt` because it is committed to the repository.
 
-## Configurable limits
+## Configuration
 
 These may be added under `Settings → Secrets and variables → Actions → Variables`:
 
-- `MAX_RECENT_COMMENTS=20`: number of recent top-level threads scanned per run.
-- `MAX_REPLIES_PER_RUN=2`: maximum generated or posted replies per run.
-- `MAX_REPLY_CHARS=300`: maximum generated reply length.
-- `MAX_THREAD_MESSAGES=8`: number of recent messages supplied to Groq for one thread.
+- `MAX_REPLY_CHARS=500`: maximum generated reply length, kept within Scratch's comment field.
 - `GROQ_MODEL=llama-3.1-8b-instant`: Groq model.
 
-If a variable is absent, the workflow uses the default shown above.
+There is no configured cap on projects, top-level threads, reply pages, thread history, or replies per run. The agent processes all eligible unanswered conversations it discovers.
 
 ## Required GitHub secrets
 
 - `SCRATCH_USERNAME`
 - `SCRATCH_SESSION_STRING`
-- `SCRATCH_PROJECT_ID`
 - `GROQ_API_KEY`
 
 `ALLOWED_USERS` is required only when `AUDIENCE_MODE=allowlist`.
@@ -99,15 +95,17 @@ GitHub Actions starts from a clean machine on each run, so the bot does not rely
 
 ## Scope
 
-Version 1.2 supports:
+Version 2.0 supports:
 
-- one Scratch project
+- every shared project owned by the bot account
+- profile comments
 - any audience or an allowlist
 - top-level comments and follow-up replies
-- short conversation context
+- complete thread context
+- all eligible replies found in each run
 - GitHub execution every five minutes
 - editable account personality
 
-It does not initiate conversations, follow users, post on profiles, join studios, create projects, or maintain long-term memory across separate Scratch threads.
+It does not initiate conversations, follow users, join studios, create projects, or maintain long-term memory across separate Scratch threads.
 
 `scratchattach` is an unofficial Scratch API wrapper. Scratch may change its site behavior and break the integration. Scratch-specific code remains isolated in `app/scratch_client.py`.

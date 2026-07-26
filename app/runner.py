@@ -9,7 +9,7 @@ from app.policy import check_incoming, check_reply
 
 
 class ScratchClientProtocol(Protocol):
-    def recent_conversation_targets(self) -> list[CommentRef]: ...
+    def conversation_targets(self) -> list[CommentRef]: ...
 
     def is_current_target(self, comment: CommentRef) -> bool: ...
 
@@ -27,7 +27,7 @@ def run_once(
     logger: logging.Logger,
 ) -> RunStats:
     stats = RunStats()
-    comments = scratch.recent_conversation_targets()
+    comments = scratch.conversation_targets()
 
     # Scratch normally returns newest root threads first. Process oldest first.
     for comment in reversed(comments):
@@ -61,10 +61,6 @@ def run_once(
 
         if agent is None:
             raise RuntimeError("An AI agent is required outside observe mode")
-
-        if stats.posted + stats.simulated >= settings.max_replies_per_run:
-            logger.info("reply limit reached for this run")
-            break
 
         try:
             decision = agent.generate(comment)

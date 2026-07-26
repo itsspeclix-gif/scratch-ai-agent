@@ -31,16 +31,12 @@ def _positive_int(name: str, default: int) -> int:
 class Settings:
     scratch_username: str
     scratch_session_string: str
-    scratch_project_id: str
     groq_api_key: str
     groq_model: str
     allowed_users: frozenset[str]
     audience_mode: AudienceMode
     bot_mode: BotMode
-    max_recent_comments: int
-    max_replies_per_run: int
     max_reply_chars: int
-    max_thread_messages: int
     persona: str
 
     @classmethod
@@ -81,15 +77,11 @@ class Settings:
         return cls(
             scratch_username=_required("SCRATCH_USERNAME"),
             scratch_session_string=_required("SCRATCH_SESSION_STRING"),
-            scratch_project_id=_required("SCRATCH_PROJECT_ID"),
             groq_api_key=groq_key,
             groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip(),
             allowed_users=allowed_users,
             audience_mode=audience_mode,
             bot_mode=mode,
-            max_recent_comments=_positive_int("MAX_RECENT_COMMENTS", 20),
-            max_replies_per_run=_positive_int("MAX_REPLIES_PER_RUN", 2),
-            max_reply_chars=_positive_int("MAX_REPLY_CHARS", 300),
-            max_thread_messages=_positive_int("MAX_THREAD_MESSAGES", 8),
+            max_reply_chars=_positive_int("MAX_REPLY_CHARS", 500),
             persona=persona,
         )

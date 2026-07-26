@@ -22,6 +22,8 @@ class CommentRef:
     raw: Any
     root_id: str | None = None
     thread: tuple[ThreadTurn, ...] = field(default_factory=tuple)
+    source: str = "project"
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)

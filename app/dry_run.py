@@ -28,7 +28,7 @@ class FakeScratch:
             CommentRef("4", "SomeoneElse", "Hello", None, object(), root_id="4"),
         ]
 
-    def recent_conversation_targets(self) -> list[CommentRef]:
+    def conversation_targets(self) -> list[CommentRef]:
         return [comment for comment in self._comments if comment.id in self._active or comment.id == "4"]
 
     def is_current_target(self, comment: CommentRef) -> bool:
@@ -48,16 +48,12 @@ def main() -> None:
     settings = Settings(
         scratch_username="BotAccount",
         scratch_session_string="fake-session",
-        scratch_project_id="123",
         groq_api_key="fake-groq-key",
         groq_model="llama-3.1-8b-instant",
         allowed_users=frozenset({"tester"}),
         audience_mode="allowlist",
         bot_mode="private",
-        max_recent_comments=20,
-        max_replies_per_run=2,
         max_reply_chars=300,
-        max_thread_messages=8,
         persona="A transparent experimental AI Scratch creator.",
     )
     scratch = FakeScratch()

@@ -30,8 +30,6 @@ def check_incoming(
         return PolicyResult(False, "author is not allowlisted")
     if not comment.content.strip():
         return PolicyResult(False, "comment is empty")
-    if len(comment.content) > 1000:
-        return PolicyResult(False, "comment is unusually long")
     if EMAIL_RE.search(comment.content) or PHONE_RE.search(comment.content):
         return PolicyResult(False, "comment contains contact information")
     return PolicyResult(True, "incoming comment accepted")
