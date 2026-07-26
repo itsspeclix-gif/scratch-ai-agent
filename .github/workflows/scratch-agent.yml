@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   run-agent:
+    if: github.event_name != 'schedule' || vars.CLOUDFLARE_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

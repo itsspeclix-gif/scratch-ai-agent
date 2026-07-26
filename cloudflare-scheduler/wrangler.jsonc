@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "scratch-ai-agent-scheduler",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-25",
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "vars": {
+    "GITHUB_OWNER": "itsspeclix-gif",
+    "GITHUB_REPO": "scratch-ai-agent",
+    "GITHUB_WORKFLOW": "scratch-agent.yml",
+    "GITHUB_REF": "main"
+  }
+}

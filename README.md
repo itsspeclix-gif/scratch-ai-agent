@@ -24,6 +24,18 @@ AUDIENCE_MODE=everyone
 
 With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub scheduled workflows are best-effort: runs can be delayed or dropped during periods of high load, so GitHub Actions cannot guarantee an exact five-minute response interval.
 
+## Reliable five-minute scheduling
+
+The recommended free scheduler is the Cloudflare Worker in
+`cloudflare-scheduler`. It uses a Cloudflare Cron Trigger to call GitHub's
+`workflow_dispatch` API every five minutes, bypassing GitHub's delayed
+scheduled-event queue without moving the Python bot or its Scratch and Groq
+secrets out of GitHub.
+
+Follow `cloudflare-scheduler/README.md` to create a repository-scoped GitHub
+token, deploy the Worker, test one dispatch, and disable the native GitHub
+schedule. Keep `CLOUDFLARE_SCHEDULER_ENABLED` unset until that test succeeds.
+
 ## Account-wide conversations
 
 Version 2.0 discovers every shared project owned by `SCRATCH_USERNAME` automatically. It also checks comments on the account profile, so no project ID or project allowlist is required.

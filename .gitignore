@@ -3,3 +3,6 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+cloudflare-scheduler/node_modules/
+cloudflare-scheduler/.wrangler/
+cloudflare-scheduler/.dev.vars
