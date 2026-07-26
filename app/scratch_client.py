@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
 from app.config import Settings
@@ -18,7 +19,11 @@ class ScratchClient:
             raise RuntimeError("scratchattach is not installed; run 'make install'") from exc
 
         self._settings = settings
-        self._session = sa.login_by_session_string(settings.scratch_session_string)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=sa.LoginDataWarning)
+            self._session = sa.login_by_session_string(
+                settings.scratch_session_string
+            )
         actual_username = str(self._session.username)
         if actual_username.casefold() != settings.scratch_username.casefold():
             raise RuntimeError(
@@ -29,6 +34,7 @@ class ScratchClient:
         self._sources: dict[tuple[str, str], Any] = {
             ("profile", settings.scratch_username.casefold()): self._user,
         }
+        self._profile_user_ids: dict[str, Any] = {}
 
     @staticmethod
     def _id_sort_key(raw_id: Any) -> tuple[int, str]:
@@ -152,6 +158,18 @@ class ScratchClient:
             offset += len(page)
         return roots
 
+    @staticmethod
+    def _profile_root_by_id(source: Any, root_id: str) -> Any | None:
+        page_number = 1
+        while True:
+            roots = list(source.comments(page=page_number) or [])
+            if not roots:
+                return None
+            for root in roots:
+                if str(root.id) == str(root_id):
+                    return root
+            page_number += 1
+
     def conversation_targets(self) -> list[CommentRef]:
         result: list[CommentRef] = []
         sources: list[tuple[str, str, Any]] = [
@@ -211,7 +229,12 @@ class ScratchClient:
             return False
 
         root_id = comment.root_id or comment.id
-        root = source.comment_by_id(root_id)
+        if comment.source == "profile":
+            root = self._profile_root_by_id(source, root_id)
+            if root is None:
+                return False
+        else:
+            root = source.comment_by_id(root_id)
         current = self._candidate_from_root(
             root,
             source_type=comment.source,
@@ -219,7 +242,33 @@ class ScratchClient:
         )
         return current is not None and current.id == comment.id
 
+    def _profile_commentee_id(self, comment: CommentRef) -> Any:
+        raw_author_id = getattr(comment.raw, "author_id", None)
+        if raw_author_id not in (None, "", 0, "0"):
+            return raw_author_id
+
+        username_key = comment.author.casefold()
+        if username_key not in self._profile_user_ids:
+            author = self._session.connect_user(comment.author)
+            author_id = getattr(author, "id", None)
+            if author_id in (None, "", 0, "0"):
+                raise RuntimeError(
+                    f"Could not resolve Scratch user id for {comment.author}"
+                )
+            self._profile_user_ids[username_key] = author_id
+        return self._profile_user_ids[username_key]
+
     def reply(self, comment: CommentRef, text: str) -> None:
-        # scratchattach sets the correct root parent and commentee for both root comments
+        if comment.source == "profile":
+            # scratchattach's profile endpoint returns HTML, but its shared response
+            # checker tries to decode every successful response as JSON first.
+            from scratchattach.utils.requests import requests as scratch_requests
+
+            commentee_id = self._profile_commentee_id(comment)
+            with scratch_requests.no_error_handling():
+                comment.raw.reply(text, commentee_id=commentee_id)
+            return
+
+        # scratchattach sets the correct root parent and commentee for project roots
         # and follow-up replies.
         comment.raw.reply(text)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from app.config import Settings
+from app.models import CommentRef
 from app.scratch_client import ScratchClient
 
 
@@ -127,6 +129,79 @@ class ScratchClientThreadTests(unittest.TestCase):
         self.assertEqual([turn.id for turn in target.thread], ["1", "2", "3", "4"])
         self.assertEqual(root.reply_offsets, [0, 2])
 
+    def test_profile_reply_uses_profile_html_response_handler(self) -> None:
+        events: list[str] = []
+
+        @contextmanager
+        def profile_response_handler():
+            events.append("enter")
+            yield
+            events.append("exit")
+
+        class RawProfileComment:
+            def reply(self, text: str, *, commentee_id: int) -> None:
+                events.append(f"reply:{text}:to:{commentee_id}")
+
+        class ProfileAuthor:
+            id = 42
+
+        class FakeSession:
+            def connect_user(self, username: str) -> ProfileAuthor:
+                events.append(f"resolve:{username}")
+                return ProfileAuthor()
+
+        self.client._session = FakeSession()
+        self.client._profile_user_ids = {}
+
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "scratchattach.utils.requests.requests.no_error_handling",
+            side_effect=profile_response_handler,
+        ) as no_error_handling:
+            self.client.reply(comment, "Profile response")
+
+        no_error_handling.assert_called_once_with()
+        self.assertEqual(
+            events,
+            [
+                "resolve:User",
+                "enter",
+                "reply:Profile response:to:42",
+                "exit",
+            ],
+        )
+
+    def test_project_reply_keeps_standard_response_handling(self) -> None:
+        raw = FakeComment(10, "User", "Hello")
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            raw,
+            root_id="10",
+            source="project",
+            source_id="123",
+        )
+
+        with patch(
+            "scratchattach.utils.requests.requests.no_error_handling"
+        ) as no_error_handling:
+            self.client.reply(comment, "Project response")
+
+        no_error_handling.assert_not_called()
+        self.assertEqual(raw.posted, ["Project response"])
+
 
 class FakeProject:
     def __init__(self, project_id: int, roots: list[FakeComment]) -> None:
@@ -146,7 +221,7 @@ class FakeUser:
     def __init__(
         self,
         projects: list[FakeProject],
-        profile_pages: dict[int, list[FakeComment]],
+        profile_pages: dict[int, list[FakeComment] | None],
     ) -> None:
         self._projects = projects
         self._profile_pages = profile_pages
@@ -157,16 +232,12 @@ class FakeUser:
         self.project_offsets.append(offset)
         return self._projects[offset : offset + limit]
 
-    def comments(self, *, page: int) -> list[FakeComment]:
+    def comments(self, *, page: int) -> list[FakeComment] | None:
         self.profile_pages.append(page)
-        return self._profile_pages.get(page, [])
+        return self._profile_pages.get(page)
 
     def comment_by_id(self, comment_id: str) -> FakeComment:
-        for roots in self._profile_pages.values():
-            for root in roots:
-                if str(root.id) == str(comment_id):
-                    return root
-        raise LookupError(comment_id)
+        raise AssertionError("profile rechecks must not use scratchattach.comment_by_id")
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
@@ -220,6 +291,42 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         self.assertIn(("project", "103"), client._sources)
         self.assertTrue(client.is_current_target(targets[0]))
         self.assertTrue(client.is_current_target(targets[2]))
+
+    def test_missing_profile_root_is_stale_instead_of_erroring(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        user = FakeUser([], {1: None})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._user = user
+        client._sources = {("profile", "bot"): user}
+        comment = CommentRef(
+            "11",
+            "User",
+            "Deleted before posting",
+            None,
+            FakeComment(
+                11,
+                "User",
+                "Deleted before posting",
+                source="profile",
+                source_id="Bot",
+            ),
+            root_id="11",
+            source="profile",
+            source_id="Bot",
+        )
+
+        self.assertFalse(client.is_current_target(comment))
 
 
 if __name__ == "__main__":
