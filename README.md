@@ -15,14 +15,14 @@ Audience modes:
 
 ## Automatic GitHub replies
 
-The GitHub Actions workflow runs every five minutes and can also be run manually. Automatic posting requires these repository variables:
+The GitHub Actions workflow requests a run every five minutes and can also be run manually. The schedule is offset from the start of each hour to reduce GitHub scheduler congestion. Automatic posting requires these repository variables:
 
 ```text
 BOT_MODE=private
 AUDIENCE_MODE=everyone
 ```
 
-With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub schedules can begin a few minutes late.
+With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub scheduled workflows are best-effort: runs can be delayed or dropped during periods of high load, so GitHub Actions cannot guarantee an exact five-minute response interval.
 
 ## Account-wide conversations
 
@@ -103,7 +103,7 @@ Version 2.0 supports:
 - top-level comments and follow-up replies
 - complete thread context
 - all eligible replies found in each run
-- GitHub execution every five minutes
+- GitHub execution requested every five minutes
 - editable account personality
 
 It does not initiate conversations, follow users, join studios, create projects, or maintain long-term memory across separate Scratch threads.

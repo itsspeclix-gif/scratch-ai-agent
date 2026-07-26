@@ -3,7 +3,8 @@ name: Scratch AI agent
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    # Offset from the busiest start-of-hour window to reduce scheduler delays.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
 
 permissions:
   contents: read
