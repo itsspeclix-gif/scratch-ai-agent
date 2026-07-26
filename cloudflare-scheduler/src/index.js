@@ -61,7 +61,7 @@ export default {
       return Response.json({
         status: "ok",
         scheduler: "scratch-ai-agent",
-        interval: "5 minutes",
+        interval: "1 minute",
       });
     }
     return new Response("Not found", { status: 404 });

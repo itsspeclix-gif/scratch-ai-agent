@@ -1,6 +1,6 @@
 # Cloudflare scheduler
 
-This Worker triggers the GitHub Actions workflow every five minutes. The
+This Worker triggers the GitHub Actions workflow every minute. The
 Scratch agent and its existing secrets continue to run inside GitHub Actions.
 
 ## 1. Create a restricted GitHub token
@@ -31,9 +31,9 @@ Copy the token when GitHub displays it. Never put it in this repository.
    - Variable: `GITHUB_WORKFLOW=scratch-agent.yml`
    - Variable: `GITHUB_REF=main`
 5. Under `Settings -> Triggers -> Cron Triggers`, add:
-   `*/5 * * * *`
+   `* * * * *`
 
-Cron Triggers use UTC, but this expression runs every five minutes in every
+Cron Triggers use UTC, but this expression runs every minute in every
 time zone.
 
 ## 3. Test the dispatch
@@ -70,7 +70,7 @@ npm test
 npm run deploy
 ```
 
-The non-secret GitHub settings and five-minute Cron Trigger are defined in
+The non-secret GitHub settings and one-minute Cron Trigger are defined in
 `wrangler.jsonc`.
 
 For an immediate local scheduled-event test, run `npm run dev` and open:

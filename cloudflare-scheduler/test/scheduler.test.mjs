@@ -65,6 +65,6 @@ test("health endpoint exposes no credentials", async () => {
   assert.deepEqual(await response.json(), {
     status: "ok",
     scheduler: "scratch-ai-agent",
-    interval: "5 minutes",
+    interval: "1 minute",
   });
 });
