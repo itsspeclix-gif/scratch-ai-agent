@@ -129,11 +129,58 @@ class ScratchClientThreadTests(unittest.TestCase):
         self.assertEqual([turn.id for turn in target.thread], ["1", "2", "3", "4"])
         self.assertEqual(root.reply_offsets, [0, 2])
 
+    def test_profile_fetch_is_authenticated_and_cache_busted(self) -> None:
+        class FakeSession:
+            _headers = {"X-Token": "token"}
+            _cookies = {"scratchsessionsid": "session"}
+
+        class ProfileSource:
+            username = "Bot"
+
+        class SuccessfulResponse:
+            status_code = 200
+            content = b"""
+                <li class="top-level-reply">
+                  <div class="comment" data-comment-id="20">
+                    <a id="comment-user" data-comment-user="User"></a>
+                    <div class="content">Newest thread</div>
+                  </div>
+                  <ul>
+                    <li class="reply">
+                      <div class="comment" data-comment-id="21">
+                        <a id="comment-user" data-comment-user="Bot"></a>
+                        <div class="content">@User Existing reply</div>
+                      </div>
+                    </li>
+                  </ul>
+                </li>
+            """
+
+        self.client._session = FakeSession()
+        with patch(
+            "app.scratch_client.requests.get",
+            return_value=SuccessfulResponse(),
+        ) as get:
+            roots = self.client._fresh_profile_page(ProfileSource(), 1)
+
+        self.assertEqual([root.id for root in roots], ["20"])
+        self.assertEqual([reply.id for reply in roots[0].replies()], ["21"])
+        self.assertEqual(roots[0].replies()[0].parent_id, "20")
+        kwargs = get.call_args.kwargs
+        self.assertEqual(kwargs["params"]["page"], 1)
+        self.assertIsInstance(kwargs["params"]["_"], int)
+        self.assertEqual(kwargs["headers"]["Cache-Control"], "no-cache")
+        self.assertEqual(kwargs["headers"]["Pragma"], "no-cache")
+        self.assertEqual(kwargs["cookies"], {"scratchsessionsid": "session"})
+        self.assertEqual(kwargs["timeout"], 30)
+
     def test_profile_reply_accepts_success_html_with_wrapped_attributes(self) -> None:
         events: list[str] = []
 
         class RawProfileComment:
             author_id = None
+            id = 10
+            parent_id = None
 
         class ProfileAuthor:
             id = 42
@@ -199,9 +246,47 @@ class ScratchClientThreadTests(unittest.TestCase):
             },
         )
 
+    def test_profile_reply_prefers_raw_comment_id_over_stale_root_id(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+            id = 20
+            parent_id = None
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class SuccessfulResponse:
+            status_code = 200
+            text = '<div class="comment" data-comment-id="21"></div>'
+
+        self.client._session = FakeSession()
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "20",
+            "User",
+            "Newest separate thread",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=SuccessfulResponse(),
+        ) as post:
+            self.client.reply(comment, "Reply to the newest thread")
+
+        payload = json.loads(post.call_args.kwargs["data"])
+        self.assertEqual(payload["parent_id"], "20")
+
     def test_profile_reply_rejects_success_status_without_created_comment(self) -> None:
         class RawProfileComment:
             author_id = 42
+            id = 10
+            parent_id = None
 
         class FakeSession:
             _headers: dict[str, str] = {}
@@ -330,7 +415,14 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         client._user = user
         client._sources = {("profile", "bot"): user}
 
-        with patch("app.scratch_client.PAGE_SIZE", 2):
+        with (
+            patch("app.scratch_client.PAGE_SIZE", 2),
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+        ):
             targets = client.conversation_targets()
 
         self.assertEqual([target.id for target in targets], ["40", "30", "10"])
@@ -340,7 +432,12 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         self.assertIn(("project", "102"), client._sources)
         self.assertIn(("project", "103"), client._sources)
         self.assertTrue(client.is_current_target(targets[0]))
-        self.assertTrue(client.is_current_target(targets[2]))
+        with patch.object(
+            client,
+            "_fresh_profile_page",
+            side_effect=lambda source, page: source.comments(page=page),
+        ):
+            self.assertTrue(client.is_current_target(targets[2]))
 
     def test_missing_profile_root_is_stale_instead_of_erroring(self) -> None:
         settings = Settings(
@@ -376,7 +473,12 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             source_id="Bot",
         )
 
-        self.assertFalse(client.is_current_target(comment))
+        with patch.object(
+            client,
+            "_fresh_profile_page",
+            side_effect=lambda source, page: source.comments(page=page),
+        ):
+            self.assertFalse(client.is_current_target(comment))
 
 
 if __name__ == "__main__":

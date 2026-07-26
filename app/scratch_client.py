@@ -2,17 +2,48 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import warnings
 from html.parser import HTMLParser
 from typing import Any
 
 import requests
+from bs4 import BeautifulSoup
 
 from app.config import Settings
 from app.models import CommentRef, ThreadTurn
 
 PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
+
+
+class _ProfileComment:
+    def __init__(
+        self,
+        *,
+        comment_id: str,
+        author: str,
+        content: str,
+        source_id: str,
+        parent_id: str | None = None,
+    ) -> None:
+        self.id = comment_id
+        self.author_name = author
+        self.content = content
+        self.source = "profile"
+        self.source_id = source_id
+        self.parent_id = parent_id
+        self.cached_replies: list[_ProfileComment] = []
+
+    def replies(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Any]:
+        if limit is None:
+            return self.cached_replies[offset:]
+        return self.cached_replies[offset : offset + limit]
 
 
 class _ProfilePostParser(HTMLParser):
@@ -168,13 +199,84 @@ class ScratchClient:
             offset += len(page)
         return projects
 
-    @staticmethod
-    def _roots(source_type: str, source: Any) -> list[Any]:
+    def _fresh_profile_page(self, source: Any, page_number: int) -> list[Any]:
+        profile_username = str(
+            getattr(source, "username", None)
+            or self._settings.scratch_username
+        )
+        headers = dict(getattr(self._session, "_headers", {}))
+        headers["Cache-Control"] = "no-cache"
+        headers["Pragma"] = "no-cache"
+        response = requests.get(
+            f"https://scratch.mit.edu/site-api/comments/user/{profile_username}/",
+            params={"page": page_number, "_": time.time_ns()},
+            headers=headers,
+            cookies=getattr(self._session, "_cookies", {}),
+            timeout=30,
+        )
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(
+                "Scratch rejected the profile comment fetch "
+                f"(HTTP {response.status_code})"
+            )
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        roots: list[_ProfileComment] = []
+        for entity in soup.select("li.top-level-reply"):
+            root_node = entity.find("div", class_="comment")
+            author_node = entity.find("a", id="comment-user")
+            content_node = entity.find("div", class_="content")
+            if root_node is None or author_node is None or content_node is None:
+                raise RuntimeError("Scratch returned malformed profile comment HTML")
+
+            root_id = root_node.get("data-comment-id")
+            author = author_node.get("data-comment-user")
+            if not root_id or not author:
+                raise RuntimeError("Scratch profile comment is missing an id or author")
+
+            root = _ProfileComment(
+                comment_id=str(root_id),
+                author=str(author),
+                content=content_node.get_text(" ", strip=True),
+                source_id=profile_username,
+            )
+            for reply_entity in entity.select("li.reply"):
+                reply_node = reply_entity.find("div", class_="comment")
+                reply_author_node = reply_entity.find("a", id="comment-user")
+                reply_content_node = reply_entity.find("div", class_="content")
+                if (
+                    reply_node is None
+                    or reply_author_node is None
+                    or reply_content_node is None
+                ):
+                    raise RuntimeError(
+                        "Scratch returned malformed profile reply HTML"
+                    )
+
+                reply_id = reply_node.get("data-comment-id")
+                reply_author = reply_author_node.get("data-comment-user")
+                if not reply_id or not reply_author:
+                    raise RuntimeError(
+                        "Scratch profile reply is missing an id or author"
+                    )
+                root.cached_replies.append(
+                    _ProfileComment(
+                        comment_id=str(reply_id),
+                        author=str(reply_author),
+                        content=reply_content_node.get_text(" ", strip=True),
+                        source_id=profile_username,
+                        parent_id=str(root_id),
+                    )
+                )
+            roots.append(root)
+        return roots
+
+    def _roots(self, source_type: str, source: Any) -> list[Any]:
         roots: list[Any] = []
         if source_type == "profile":
             page_number = 1
             while True:
-                page = list(source.comments(page=page_number) or [])
+                page = self._fresh_profile_page(source, page_number)
                 if not page:
                     break
                 roots.extend(page)
@@ -192,11 +294,10 @@ class ScratchClient:
             offset += len(page)
         return roots
 
-    @staticmethod
-    def _profile_root_by_id(source: Any, root_id: str) -> Any | None:
+    def _profile_root_by_id(self, source: Any, root_id: str) -> Any | None:
         page_number = 1
         while True:
-            roots = list(source.comments(page=page_number) or [])
+            roots = self._fresh_profile_page(source, page_number)
             if not roots:
                 return None
             for root in roots:
@@ -299,7 +400,25 @@ class ScratchClient:
         commentee_id: Any,
     ) -> None:
         profile_username = comment.source_id or self._settings.scratch_username
-        parent_id = comment.root_id or comment.parent_id or comment.id
+        raw_parent_id = getattr(comment.raw, "parent_id", None)
+        raw_comment_id = getattr(comment.raw, "id", None)
+        parent_id = (
+            raw_parent_id
+            if raw_parent_id not in (None, "", 0, "0")
+            else raw_comment_id
+        )
+        if parent_id in (None, "", 0, "0"):
+            parent_id = comment.parent_id or comment.id
+        parent_id = str(parent_id)
+
+        if comment.root_id and str(comment.root_id) != parent_id:
+            logger.warning(
+                "correcting profile reply parent comment=%s stored_root=%s "
+                "authoritative_parent=%s",
+                comment.id,
+                comment.root_id,
+                parent_id,
+            )
         url = (
             "https://scratch.mit.edu/site-api/comments/user/"
             f"{profile_username}/add/"
@@ -332,7 +451,9 @@ class ScratchClient:
         parser.feed(response.text)
         if parser.created_comment_id is not None:
             logger.info(
-                "profile reply accepted created_comment=%s parent=%s",
+                "profile reply accepted source_comment=%s created_comment=%s "
+                "parent=%s",
+                comment.id,
                 parser.created_comment_id,
                 parent_id,
             )
