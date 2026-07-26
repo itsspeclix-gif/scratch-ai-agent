@@ -15,7 +15,7 @@ Audience modes:
 
 ## Automatic GitHub replies
 
-The GitHub Actions workflow runs once per hour at minute 17 and can also be run manually. Automatic posting requires these repository variables:
+The GitHub Actions workflow runs every five minutes and can also be run manually. Automatic posting requires these repository variables:
 
 ```text
 BOT_MODE=private
@@ -105,7 +105,7 @@ Version 1.2 supports:
 - any audience or an allowlist
 - top-level comments and follow-up replies
 - short conversation context
-- hourly GitHub execution
+- GitHub execution every five minutes
 - editable account personality
 
 It does not initiate conversations, follow users, post on profiles, join studios, create projects, or maintain long-term memory across separate Scratch threads.
