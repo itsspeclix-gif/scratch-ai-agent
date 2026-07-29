@@ -50,7 +50,7 @@ class GroqAgentTests(unittest.TestCase):
             scratch_username="Bot",
             scratch_session_string="fake",
             groq_api_key="fake-key",
-            groq_model="llama-3.1-8b-instant",
+            groq_model="qwen/qwen3.6-27b",
             allowed_users=frozenset({"tester"}),
             audience_mode="allowlist",
             bot_mode="simulate",
@@ -79,6 +79,7 @@ class GroqAgentTests(unittest.TestCase):
         self.assertEqual(http.headers["Content-Type"], "application/json")
         self.assertEqual(http.timeout, 30)
         self.assertEqual(http.payload["response_format"], {"type": "json_object"})
+        self.assertEqual(http.payload["reasoning_effort"], "none")
         system_prompt = http.payload["messages"][0]["content"]
         self.assertIn("Always respond to every supplied message", system_prompt)
         self.assertIn("off-topic messages", system_prompt)

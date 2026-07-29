@@ -70,6 +70,9 @@ Return one JSON object with exactly these fields:
                 },
             ],
         }
+        if self._settings.groq_model == "qwen/qwen3.6-27b":
+            payload["reasoning_effort"] = "none"
+
         headers = {
             "Authorization": f"Bearer {self._settings.groq_api_key}",
             "Content-Type": "application/json",

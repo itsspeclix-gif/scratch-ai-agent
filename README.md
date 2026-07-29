@@ -68,7 +68,7 @@ Avoid putting secrets or private information in `persona.txt` because it is comm
 These may be added under `Settings → Secrets and variables → Actions → Variables`:
 
 - `MAX_REPLY_CHARS=500`: maximum generated reply length, kept within Scratch's comment field.
-- `GROQ_MODEL=llama-3.1-8b-instant`: Groq model.
+- `GROQ_MODEL=qwen/qwen3.6-27b`: Groq model.
 
 There is no configured cap on projects, top-level threads, reply pages, thread history, or replies per run. The agent processes all eligible unanswered conversations it discovers.
 
