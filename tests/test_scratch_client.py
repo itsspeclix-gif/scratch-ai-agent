@@ -223,7 +223,7 @@ class ScratchClientThreadTests(unittest.TestCase):
             "app.scratch_client.requests.post",
             return_value=SuccessfulResponse(),
         ) as post:
-            self.client.reply(comment, "Profile response")
+            self.client.reply(comment, "@User @user, Profile response")
 
         self.assertEqual(events, ["resolve:User"])
         post.assert_called_once()
@@ -332,7 +332,7 @@ class ScratchClientThreadTests(unittest.TestCase):
         with patch(
             "scratchattach.utils.requests.requests.no_error_handling"
         ) as no_error_handling:
-            self.client.reply(comment, "Project response")
+            self.client.reply(comment, "@USER: Project response")
 
         no_error_handling.assert_not_called()
         self.assertEqual(raw.posted, ["Project response"])

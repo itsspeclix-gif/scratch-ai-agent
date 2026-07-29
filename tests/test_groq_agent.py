@@ -83,6 +83,7 @@ class GroqAgentTests(unittest.TestCase):
         system_prompt = http.payload["messages"][0]["content"]
         self.assertIn("Always respond to every supplied message", system_prompt)
         self.assertIn("off-topic messages", system_prompt)
+        self.assertIn("Do not begin the reply with @username", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn("How did you make it?", transcript)

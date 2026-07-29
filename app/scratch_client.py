@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import warnings
 from html.parser import HTMLParser
@@ -15,6 +16,14 @@ from app.models import CommentRef, ThreadTurn
 
 PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
+
+
+def _strip_leading_author_mentions(text: str, author: str) -> str:
+    mention = re.compile(
+        rf"^(?:\s*@{re.escape(author)}(?![A-Za-z0-9_-])[\s,:;.!?-]*)+",
+        re.IGNORECASE,
+    )
+    return mention.sub("", text).strip()
 
 
 class _ProfileComment:
@@ -477,6 +486,10 @@ class ScratchClient:
         raise RuntimeError(f"Profile reply was not accepted: {error_message[:200]}")
 
     def reply(self, comment: CommentRef, text: str) -> None:
+        text = _strip_leading_author_mentions(text, comment.author)
+        if not text:
+            raise RuntimeError("Reply contains only a recipient mention")
+
         if comment.source == "profile":
             commentee_id = self._profile_commentee_id(comment)
             self._post_profile_reply(comment, text, commentee_id)
