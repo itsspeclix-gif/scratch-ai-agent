@@ -136,6 +136,31 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(scratch.posted, [("1", "Sure, I can stop by.")])
 
+    def test_explicit_invitation_falls_back_when_model_omits_action(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Comment on my profile please",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "What are you making in Scratch?")],
+        )
+        self.assertEqual(scratch.posted, [("1", "Safe response.")])
+
     def test_model_cannot_redirect_invitation_to_third_party(self) -> None:
         comment = CommentRef(
             "1",

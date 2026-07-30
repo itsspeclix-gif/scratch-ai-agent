@@ -85,9 +85,22 @@ def run_once(
                 logger.warning("reject comment=%s reason=%s", comment.id, output.reason)
                 continue
 
+            explicit_profile_invitation = is_explicit_profile_invitation(
+                comment.content
+            )
             profile_comment = ""
-            if decision.profile_comment:
-                if not is_explicit_profile_invitation(comment.content):
+            proposed_profile_comment = decision.profile_comment
+            if explicit_profile_invitation and not proposed_profile_comment:
+                fallback = agent.generate_outreach(comment.author)
+                proposed_profile_comment = fallback.reply
+                logger.info(
+                    "generated fallback profile invitation comment=%s author=%s",
+                    comment.id,
+                    comment.author,
+                )
+
+            if proposed_profile_comment:
+                if not explicit_profile_invitation:
                     logger.warning(
                         "ignore profile action comment=%s reason=no explicit "
                         "author invitation",
@@ -95,11 +108,11 @@ def run_once(
                     )
                 else:
                     profile_output = check_reply(
-                        decision.profile_comment,
+                        proposed_profile_comment,
                         settings.max_reply_chars,
                     )
                     if profile_output.allowed:
-                        profile_comment = decision.profile_comment
+                        profile_comment = proposed_profile_comment
                     else:
                         stats.skipped_policy += 1
                         logger.warning(
