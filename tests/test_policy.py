@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 
 from app.models import CommentRef
-from app.policy import check_incoming, check_reply, is_explicit_profile_invitation
+from app.policy import (
+    check_incoming,
+    check_reply,
+    is_explicit_profile_invitation,
+    is_explicit_project_invitation,
+    scratch_project_id,
+)
 
 
 class PolicyTests(unittest.TestCase):
@@ -65,6 +71,40 @@ class PolicyTests(unittest.TestCase):
     def test_negated_profile_invitation_is_not_detected(self) -> None:
         self.assertFalse(
             is_explicit_profile_invitation("Please don't comment on my profile")
+        )
+
+    def test_explicit_linked_project_invitation_is_detected(self) -> None:
+        variations = (
+            "Comment on my project https://scratch.mit.edu/projects/123/",
+            "please leave a comment on this Scratch game: "
+            "https://scratch.mit.edu/projects/456",
+            "check out scratch.mit.edu/projects/789/ and comment",
+        )
+        for text in variations:
+            with self.subTest(text=text):
+                self.assertTrue(is_explicit_project_invitation(text))
+
+    def test_project_link_without_invitation_is_not_detected(self) -> None:
+        self.assertFalse(
+            is_explicit_project_invitation(
+                "I made this https://scratch.mit.edu/projects/123/"
+            )
+        )
+
+    def test_negated_project_invitation_is_not_detected(self) -> None:
+        self.assertFalse(
+            is_explicit_project_invitation(
+                "Don't comment on my project "
+                "https://scratch.mit.edu/projects/123/"
+            )
+        )
+
+    def test_project_id_is_extracted_from_scratch_url(self) -> None:
+        self.assertEqual(
+            scratch_project_id(
+                "See https://scratch.mit.edu/projects/123456/editor/"
+            ),
+            "123456",
         )
 
 

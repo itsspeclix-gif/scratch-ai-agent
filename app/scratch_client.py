@@ -730,6 +730,47 @@ class ScratchClient:
         )
         return created_comment_id
 
+    def start_project_invitation(
+        self,
+        username: str,
+        project_id: str,
+        text: str,
+    ) -> str | None:
+        source = self._connect_source("project", project_id)
+        owner = str(getattr(source, "author_name", ""))
+        if owner.casefold() != username.casefold():
+            raise RuntimeError(
+                "Invited project is not owned by the requesting Scratch user"
+            )
+
+        bot_name = self._settings.scratch_username.casefold()
+        if any(
+            str(root.author_name).casefold() == bot_name
+            for root in self._roots("project", source)
+        ):
+            logger.info(
+                "skip project invitation project=%s reason=existing bot conversation",
+                project_id,
+            )
+            return None
+
+        text = _strip_leading_author_mentions(text, username)
+        if not text:
+            raise RuntimeError(
+                "Invited project comment contains only a recipient mention"
+            )
+        created = source.post_comment(text)
+        created_comment_id = str(getattr(created, "id", "") or "")
+        if not created_comment_id:
+            raise RuntimeError("Scratch returned no created project comment id")
+        logger.info(
+            "project invitation posted user=%s project=%s created_comment=%s",
+            username,
+            project_id,
+            created_comment_id,
+        )
+        return created_comment_id
+
     def outreach_candidate(self) -> str | None:
         users = [
             username

@@ -16,6 +16,8 @@ class FakeScratch:
         self.posted: list[tuple[str, str]] = []
         self.profile_invitation_posts: list[tuple[str, str]] = []
         self.profile_invitation_result: str | None = "200"
+        self.project_invitation_posts: list[tuple[str, str, str]] = []
+        self.project_invitation_result: str | None = "300"
         self.notification_results: list[bool] = []
         self.outreach_user: str | None = None
         self.outreach_posts: list[tuple[str, str]] = []
@@ -33,6 +35,15 @@ class FakeScratch:
     def start_profile_invitation(self, username: str, text: str) -> str | None:
         self.profile_invitation_posts.append((username, text))
         return self.profile_invitation_result
+
+    def start_project_invitation(
+        self,
+        username: str,
+        project_id: str,
+        text: str,
+    ) -> str | None:
+        self.project_invitation_posts.append((username, project_id, text))
+        return self.project_invitation_result
 
     def finish_notification_batch(self, success: bool) -> None:
         self.notification_results.append(success)
@@ -52,6 +63,17 @@ class FakeAgent:
     def generate_outreach(self, username: str) -> AgentDecision:
         return AgentDecision(True, "What are you making in Scratch?", "outreach")
 
+    def generate_project_invitation(
+        self,
+        username: str,
+        project_id: str,
+    ) -> AgentDecision:
+        return AgentDecision(
+            True,
+            "What part are you working on next?",
+            "invited project comment",
+        )
+
 
 class InvitingAgent(FakeAgent):
     def generate(self, comment: CommentRef) -> AgentDecision:
@@ -70,6 +92,16 @@ class ProfileLinkAskingAgent(FakeAgent):
             "Sure, what's your profile link?",
             "explicit profile invitation",
             profile_comment="Hey! What are you creating next?",
+        )
+
+
+class ProjectInvitingAgent(FakeAgent):
+    def generate(self, comment: CommentRef) -> AgentDecision:
+        return AgentDecision(
+            True,
+            "Sure, I can visit it.",
+            "explicit project invitation",
+            project_comment="The movement feels like a fun idea. What's next?",
         )
 
 
@@ -224,6 +256,86 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(stats.profile_invites_posted, 0)
         self.assertEqual(scratch.profile_invitation_posts, [])
         self.assertEqual(scratch.posted, [("1", "Sure, I can stop by.")])
+
+    def test_explicit_project_invitation_posts_on_linked_project(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Comment on my project https://scratch.mit.edu/projects/123/",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            ProjectInvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.project_invites_posted, 1)
+        self.assertEqual(
+            scratch.project_invitation_posts,
+            [
+                (
+                    "Tester",
+                    "123",
+                    "The movement feels like a fun idea. What's next?",
+                )
+            ],
+        )
+        self.assertEqual(
+            scratch.posted,
+            [("1", "Done, I left a comment on your project.")],
+        )
+
+    def test_project_invitation_falls_back_when_model_omits_action(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Leave a comment on this game "
+            "https://scratch.mit.edu/projects/123/",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.project_invites_posted, 1)
+        self.assertEqual(
+            scratch.project_invitation_posts,
+            [("Tester", "123", "What part are you working on next?")],
+        )
+
+    def test_plain_project_link_does_not_create_project_comment(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "I made this https://scratch.mit.edu/projects/123/",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            ProjectInvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.project_invites_posted, 0)
+        self.assertEqual(scratch.project_invitation_posts, [])
 
     def test_posts_every_eligible_target_without_a_run_cap(self) -> None:
         comments = [

@@ -178,6 +178,8 @@ Version 2.0 supports:
 - replies to bot-started threads on opted-in users' profiles
 - one-at-a-time profile outreach from `config/outreach_users.txt`
 - explicit author-only profile invitations
+- explicit owner-only invitations to linked Scratch projects
+- notification-driven replies in external project threads the bot has joined
 - bounded context from the first public link in a comment
 - any audience or an allowlist
 - top-level comments and follow-up replies
@@ -187,8 +189,9 @@ Version 2.0 supports:
 - six-hour periodic reconciliation scans
 - editable account personality
 
-It does not join studios, create projects, contact an unlisted profile without
-that author's explicit invitation, or maintain long-term memory across separate
+It does not join studios, create projects, enter an external project without its
+owner's explicit linked invitation, contact an unlisted profile without that
+author's explicit invitation, or maintain long-term memory across separate
 Scratch threads.
 
 `scratchattach` is an unofficial Scratch API wrapper. Scratch may change its site behavior and break the integration. Scratch-specific code remains isolated in `app/scratch_client.py`.

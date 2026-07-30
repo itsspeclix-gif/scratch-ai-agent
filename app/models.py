@@ -32,6 +32,7 @@ class AgentDecision:
     reply: str
     reason: str
     profile_comment: str = ""
+    project_comment: str = ""
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ class RunStats:
     posted: int = 0
     profile_invites_simulated: int = 0
     profile_invites_posted: int = 0
+    project_invites_simulated: int = 0
+    project_invites_posted: int = 0
     outreach_simulated: int = 0
     outreach_posted: int = 0
     errors: int = 0

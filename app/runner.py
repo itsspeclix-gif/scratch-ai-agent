@@ -5,7 +5,13 @@ from typing import Protocol
 
 from app.config import Settings
 from app.models import AgentDecision, CommentRef, RunStats
-from app.policy import check_incoming, check_reply, is_explicit_profile_invitation
+from app.policy import (
+    check_incoming,
+    check_reply,
+    is_explicit_profile_invitation,
+    is_explicit_project_invitation,
+    scratch_project_id,
+)
 
 
 class ScratchClientProtocol(Protocol):
@@ -16,6 +22,13 @@ class ScratchClientProtocol(Protocol):
     def reply(self, comment: CommentRef, text: str) -> None: ...
 
     def start_profile_invitation(self, username: str, text: str) -> str | None: ...
+
+    def start_project_invitation(
+        self,
+        username: str,
+        project_id: str,
+        text: str,
+    ) -> str | None: ...
 
     def finish_notification_batch(self, success: bool) -> None: ...
 
@@ -28,6 +41,12 @@ class AgentProtocol(Protocol):
     def generate(self, comment: CommentRef) -> AgentDecision: ...
 
     def generate_outreach(self, username: str) -> AgentDecision: ...
+
+    def generate_project_invitation(
+        self,
+        username: str,
+        project_id: str,
+    ) -> AgentDecision: ...
 
 
 def run_once(
@@ -82,8 +101,18 @@ def run_once(
             explicit_profile_invitation = is_explicit_profile_invitation(
                 comment.content
             )
+            explicit_project_invitation = is_explicit_project_invitation(
+                comment.content
+            )
+            project_id = (
+                scratch_project_id(comment.content)
+                if explicit_project_invitation
+                else None
+            )
             reply_text = (
-                "Sure, I'll leave a comment on your profile."
+                "Sure, I'll leave a comment on your project."
+                if explicit_project_invitation
+                else "Sure, I'll leave a comment on your profile."
                 if explicit_profile_invitation
                 else decision.reply
             )
@@ -130,6 +159,49 @@ def run_once(
                     "Could not produce a safe invited profile comment"
                 )
 
+            project_comment = ""
+            proposed_project_comment = decision.project_comment
+            if explicit_project_invitation and not proposed_project_comment:
+                assert project_id is not None
+                fallback = agent.generate_project_invitation(
+                    comment.author,
+                    project_id,
+                )
+                proposed_project_comment = fallback.reply
+                logger.info(
+                    "generated fallback project invitation comment=%s "
+                    "author=%s project=%s",
+                    comment.id,
+                    comment.author,
+                    project_id,
+                )
+
+            if proposed_project_comment:
+                if not explicit_project_invitation:
+                    logger.warning(
+                        "ignore project action comment=%s reason=no explicit "
+                        "linked-project invitation",
+                        comment.id,
+                    )
+                else:
+                    project_output = check_reply(
+                        proposed_project_comment,
+                        settings.max_reply_chars,
+                    )
+                    if project_output.allowed:
+                        project_comment = proposed_project_comment
+                    else:
+                        stats.skipped_policy += 1
+                        logger.warning(
+                            "reject project action comment=%s reason=%s",
+                            comment.id,
+                            project_output.reason,
+                        )
+            if explicit_project_invitation and not project_comment:
+                raise RuntimeError(
+                    "Could not produce a safe invited project comment"
+                )
+
             if settings.bot_mode == "simulate":
                 stats.simulated += 1
                 if profile_comment:
@@ -140,6 +212,16 @@ def run_once(
                         comment.id,
                         comment.author,
                         profile_comment,
+                    )
+                if project_comment:
+                    stats.project_invites_simulated += 1
+                    logger.info(
+                        "simulate project invitation source_comment=%s "
+                        "author=%s project=%s proposed_comment=%r",
+                        comment.id,
+                        comment.author,
+                        project_id,
+                        project_comment,
                     )
                 logger.info(
                     "simulate comment=%s author=%s proposed_reply=%r agent_reason=%s",
@@ -175,6 +257,29 @@ def run_once(
                 elif explicit_profile_invitation:
                     reply_text = (
                         "I already have a conversation open on your profile."
+                    )
+
+            if project_comment:
+                assert project_id is not None
+                created_id = scratch.start_project_invitation(
+                    comment.author,
+                    project_id,
+                    project_comment,
+                )
+                if created_id is not None:
+                    reply_text = "Done, I left a comment on your project."
+                    stats.project_invites_posted += 1
+                    logger.info(
+                        "posted project invitation source_comment=%s "
+                        "author=%s project=%s created_comment=%s",
+                        comment.id,
+                        comment.author,
+                        project_id,
+                        created_id,
+                    )
+                else:
+                    reply_text = (
+                        "I already have a conversation open on that project."
                     )
 
             scratch.reply(comment, reply_text)

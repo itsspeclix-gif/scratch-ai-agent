@@ -52,12 +52,55 @@ NEGATED_PROFILE_INVITE_RE = re.compile(
     r"say (?:hi|hello)|check out)\b",
     re.IGNORECASE,
 )
+SCRATCH_PROJECT_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?scratch\.mit\.edu/projects/(\d+)(?:[/?#]|$)",
+    re.IGNORECASE,
+)
+PROJECT_INVITE_REQUEST_RE = re.compile(
+    r"""
+    \b
+    (?:
+        comment(?:\s+(?:on|at))?
+        | post(?:\s+(?:on|to))?
+        | leave\s+(?:(?:me\s+)?a\s+)?comment(?:\s+(?:on|at))?
+        | visit
+        | check\s+out
+        | look\s+at
+        | review
+    )
+    \b
+    .{0,100}
+    (?:
+        \b(?:my|this)\s+(?:scratch\s+)?(?:project|game)\b
+        | scratch\.mit\.edu/projects/\d+
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+NEGATED_PROJECT_INVITE_RE = re.compile(
+    r"\b(?:do not|don't|dont|never|stop|not)\b.{0,40}"
+    r"\b(?:comment|post|leave|visit|check out|look at|review)\b",
+    re.IGNORECASE,
+)
 
 
 def is_explicit_profile_invitation(text: str) -> bool:
     return bool(
         PROFILE_INVITE_REQUEST_RE.search(text)
         and not NEGATED_PROFILE_INVITE_RE.search(text)
+    )
+
+
+def scratch_project_id(text: str) -> str | None:
+    match = SCRATCH_PROJECT_URL_RE.search(text)
+    return match.group(1) if match else None
+
+
+def is_explicit_project_invitation(text: str) -> bool:
+    return bool(
+        scratch_project_id(text)
+        and PROJECT_INVITE_REQUEST_RE.search(text)
+        and not NEGATED_PROJECT_INVITE_RE.search(text)
     )
 
 

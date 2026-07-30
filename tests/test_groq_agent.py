@@ -103,6 +103,7 @@ class GroqAgentTests(unittest.TestCase):
         self.assertIn("off-topic messages", system_prompt)
         self.assertIn("Do not begin the reply with @username", system_prompt)
         self.assertIn("profile_comment", system_prompt)
+        self.assertIn("project_comment", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn("How did you make it?", transcript)
@@ -209,6 +210,31 @@ class GroqAgentTests(unittest.TestCase):
         self.assertIn("opening profile comment", system_prompt)
         self.assertIn("Do not claim to have inspected", system_prompt)
         self.assertIn("Tester", http.payload["messages"][1]["content"])
+        self.assertTrue(decision.should_reply)
+
+    def test_project_invitation_request_uses_separate_prompt(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession()
+
+        decision = GroqAgent(
+            settings,
+            http=http,
+        ).generate_project_invitation("Tester", "123")
+
+        system_prompt = http.payload["messages"][0]["content"]
+        self.assertIn("standalone comment for a Scratch project", system_prompt)
+        self.assertIn("Do not claim to have played", system_prompt)
+        self.assertIn('"project_id": "123"', http.payload["messages"][1]["content"])
         self.assertTrue(decision.should_reply)
 
     def test_mistral_provider_uses_pinned_model_and_direct_endpoint(self) -> None:

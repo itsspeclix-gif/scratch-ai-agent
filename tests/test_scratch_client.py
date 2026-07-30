@@ -340,17 +340,35 @@ class ScratchClientThreadTests(unittest.TestCase):
 
 
 class FakeProject:
-    def __init__(self, project_id: int, roots: list[FakeComment]) -> None:
+    def __init__(
+        self,
+        project_id: int,
+        roots: list[FakeComment],
+        *,
+        author_name: str = "Bot",
+    ) -> None:
         self.id = project_id
         self._roots = roots
+        self.author_name = author_name
         self.comment_offsets: list[int] = []
+        self.posted: list[str] = []
 
     def comments(self, *, limit: int, offset: int) -> list[FakeComment]:
         self.comment_offsets.append(offset)
         return self._roots[offset : offset + limit]
 
     def comment_by_id(self, comment_id: str) -> FakeComment:
-        return next(root for root in self._roots if str(root.id) == str(comment_id))
+        for root in self._roots:
+            if str(root.id) == str(comment_id):
+                return root
+            for reply in root._replies:
+                if str(reply.id) == str(comment_id):
+                    return reply
+        raise StopIteration
+
+    def post_comment(self, text: str) -> object:
+        self.posted.append(text)
+        return SimpleNamespace(id=99)
 
 
 class FakeUser:
@@ -384,11 +402,16 @@ class FakeSession:
         self,
         messages: list[object] | None = None,
         users: dict[str, object] | None = None,
+        projects: dict[str, object] | None = None,
     ) -> None:
         self._messages = messages or []
         self._users = {
             username.casefold(): user
             for username, user in (users or {}).items()
+        }
+        self._projects = {
+            str(project_id): project
+            for project_id, project in (projects or {}).items()
         }
         self.cleared = 0
 
@@ -404,8 +427,144 @@ class FakeSession:
     def connect_user(self, username: str) -> object:
         return self._users[username.casefold()]
 
+    def connect_project(self, project_id: str) -> object:
+        return self._projects[str(project_id)]
+
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
+    def test_invited_owned_project_receives_top_level_comment(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        project = FakeProject(123, [], author_name="Other")
+        session = FakeSession(projects={"123": project})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+        client._sources = {}
+
+        created_id = client.start_project_invitation(
+            "Other",
+            "123",
+            "@Other What are you building next?",
+        )
+
+        self.assertEqual(created_id, "99")
+        self.assertEqual(project.posted, ["What are you building next?"])
+
+    def test_project_invitation_rejects_project_owned_by_someone_else(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        project = FakeProject(123, [], author_name="ThirdParty")
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = FakeSession(projects={"123": project})
+        client._sources = {}
+
+        with self.assertRaisesRegex(RuntimeError, "not owned"):
+            client.start_project_invitation(
+                "Other",
+                "123",
+                "What are you building next?",
+            )
+
+        self.assertEqual(project.posted, [])
+
+    def test_project_invitation_skips_existing_bot_thread(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        existing = FakeComment(10, "Bot", "Existing conversation", source_id="123")
+        project = FakeProject(123, [existing], author_name="Other")
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = FakeSession(projects={"123": project})
+        client._sources = {}
+
+        created_id = client.start_project_invitation(
+            "Other",
+            "123",
+            "What are you building next?",
+        )
+
+        self.assertIsNone(created_id)
+        self.assertEqual(project.posted, [])
+
+    def test_notification_finds_reply_on_invited_external_project(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+            full_scan_interval_minutes=360,
+        )
+        reply = FakeComment(
+            12,
+            "Other",
+            "@Bot I'm adding another level.",
+            parent_id=10,
+            source_id="123",
+        )
+        root = FakeComment(
+            10,
+            "Bot",
+            "What are you building next?",
+            replies=[reply],
+            source_id="123",
+        )
+        project = FakeProject(123, [root], author_name="Other")
+        message = SimpleNamespace(
+            type="addcomment",
+            comment_type=0,
+            comment_id=12,
+            comment_obj_id=123,
+        )
+        session = FakeSession([message], projects={"123": project})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        with patch.object(client, "_full_scan_due", return_value=False):
+            targets = client.conversation_targets()
+
+        self.assertEqual([target.id for target in targets], ["12"])
+        self.assertEqual(targets[0].source, "project")
+        self.assertEqual(targets[0].source_id, "123")
+
     def test_discovers_profile_and_every_project_page(self) -> None:
         settings = Settings(
             scratch_username="Bot",
