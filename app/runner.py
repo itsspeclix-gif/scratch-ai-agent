@@ -79,15 +79,20 @@ def run_once(
                 logger.info("skip comment=%s agent_reason=%s", comment.id, decision.reason)
                 continue
 
-            output = check_reply(decision.reply, settings.max_reply_chars)
+            explicit_profile_invitation = is_explicit_profile_invitation(
+                comment.content
+            )
+            reply_text = (
+                "Sure, I'll leave a comment on your profile."
+                if explicit_profile_invitation
+                else decision.reply
+            )
+            output = check_reply(reply_text, settings.max_reply_chars)
             if not output.allowed:
                 stats.skipped_policy += 1
                 logger.warning("reject comment=%s reason=%s", comment.id, output.reason)
                 continue
 
-            explicit_profile_invitation = is_explicit_profile_invitation(
-                comment.content
-            )
             profile_comment = ""
             proposed_profile_comment = decision.profile_comment
             if explicit_profile_invitation and not proposed_profile_comment:
@@ -120,6 +125,10 @@ def run_once(
                             comment.id,
                             profile_output.reason,
                         )
+            if explicit_profile_invitation and not profile_comment:
+                raise RuntimeError(
+                    "Could not produce a safe invited profile comment"
+                )
 
             if settings.bot_mode == "simulate":
                 stats.simulated += 1
@@ -136,7 +145,7 @@ def run_once(
                     "simulate comment=%s author=%s proposed_reply=%r agent_reason=%s",
                     comment.id,
                     comment.author,
-                    decision.reply,
+                    reply_text,
                     decision.reason,
                 )
                 continue
@@ -154,6 +163,7 @@ def run_once(
                     profile_comment,
                 )
                 if created_id is not None:
+                    reply_text = "Done, I left a comment on your profile."
                     stats.profile_invites_posted += 1
                     logger.info(
                         "posted profile invitation source_comment=%s author=%s "
@@ -162,14 +172,18 @@ def run_once(
                         comment.author,
                         created_id,
                     )
+                elif explicit_profile_invitation:
+                    reply_text = (
+                        "I already have a conversation open on your profile."
+                    )
 
-            scratch.reply(comment, decision.reply)
+            scratch.reply(comment, reply_text)
             stats.posted += 1
             logger.info(
                 "posted comment=%s author=%s reply=%r agent_reason=%s",
                 comment.id,
                 comment.author,
-                decision.reply,
+                reply_text,
                 decision.reason,
             )
         except Exception:

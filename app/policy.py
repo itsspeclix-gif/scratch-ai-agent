@@ -20,26 +20,43 @@ SEVERE_CONTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
-SELF_PROFILE_RE = re.compile(
-    r"\b(?:my|on my)\s+(?:scratch\s+)?(?:profile|page)\b",
-    re.IGNORECASE,
-)
-PROFILE_INVITE_ACTION_RE = re.compile(
-    r"\b(?:comment|post|leave|visit|come|stop by|drop by|"
-    r"say (?:hi|hello)|check out)\b",
-    re.IGNORECASE,
+PROFILE_INVITE_REQUEST_RE = re.compile(
+    r"""
+    ^\s*
+    (?:(?:hey|hi|yo)[,!]?\s+)?
+    (?:(?:please|pls)\s+)?
+    (?:(?:can|could|would|will)\s+(?:you|u)\s+)?
+    (?:go\s+)?
+    (?:
+        comment(?:\s+(?:on|at))?
+        | post(?:\s+(?:on|to))?
+        | (?:come\s+)?leave\s+(?:(?:me\s+)?a\s+)?comment(?:\s+(?:on|at))?
+        | visit
+        | come\s+to
+        | stop\s+by
+        | drop\s+by
+        | check\s+out
+        | say\s+(?:hi|hello)\s+(?:on|at)
+    )
+    \s+
+    (?:my\s+)?
+    (?:scratch\s+)?
+    (?:profile|page|pf)
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 NEGATED_PROFILE_INVITE_RE = re.compile(
     r"\b(?:do not|don't|dont|never|stop|not)\b.{0,35}"
-    r"\b(?:comment|post|visit|come|stop by|drop by|check out)\b",
+    r"\b(?:comment|post|leave|visit|come|stop by|drop by|"
+    r"say (?:hi|hello)|check out)\b",
     re.IGNORECASE,
 )
 
 
 def is_explicit_profile_invitation(text: str) -> bool:
     return bool(
-        SELF_PROFILE_RE.search(text)
-        and PROFILE_INVITE_ACTION_RE.search(text)
+        PROFILE_INVITE_REQUEST_RE.search(text)
         and not NEGATED_PROFILE_INVITE_RE.search(text)
     )
 

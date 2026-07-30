@@ -30,11 +30,32 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(result.allowed)
 
     def test_explicit_self_profile_invitation_is_detected(self) -> None:
-        self.assertTrue(
-            is_explicit_profile_invitation(
-                "Could you come leave a comment on my Scratch profile?"
-            )
+        variations = (
+            "Could you come leave a comment on my Scratch profile?",
+            "comment on my profile please",
+            "comment profile",
+            "can u comment profile pls",
+            "please visit my pf",
+            "stop by my page",
+            "say hi on my profile",
         )
+        for text in variations:
+            with self.subTest(text=text):
+                self.assertTrue(
+                    is_explicit_profile_invitation(text)
+                )
+
+    def test_profile_description_is_not_mistaken_for_invitation(self) -> None:
+        descriptions = (
+            "I changed my profile comment yesterday",
+            "How do I comment on a profile?",
+            "Their profile has comments disabled",
+        )
+        for text in descriptions:
+            with self.subTest(text=text):
+                self.assertFalse(
+                    is_explicit_profile_invitation(text)
+                )
 
     def test_third_party_profile_request_is_not_an_invitation(self) -> None:
         self.assertFalse(

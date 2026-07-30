@@ -15,6 +15,7 @@ class FakeScratch:
         self.force_stale = False
         self.posted: list[tuple[str, str]] = []
         self.profile_invitation_posts: list[tuple[str, str]] = []
+        self.profile_invitation_result: str | None = "200"
         self.notification_results: list[bool] = []
         self.outreach_user: str | None = None
         self.outreach_posts: list[tuple[str, str]] = []
@@ -31,7 +32,7 @@ class FakeScratch:
 
     def start_profile_invitation(self, username: str, text: str) -> str | None:
         self.profile_invitation_posts.append((username, text))
-        return "200"
+        return self.profile_invitation_result
 
     def finish_notification_batch(self, success: bool) -> None:
         self.notification_results.append(success)
@@ -57,6 +58,16 @@ class InvitingAgent(FakeAgent):
         return AgentDecision(
             True,
             "Sure, I can stop by.",
+            "explicit profile invitation",
+            profile_comment="Hey! What are you creating next?",
+        )
+
+
+class ProfileLinkAskingAgent(FakeAgent):
+    def generate(self, comment: CommentRef) -> AgentDecision:
+        return AgentDecision(
+            True,
+            "Sure, what's your profile link?",
             "explicit profile invitation",
             profile_comment="Hey! What are you creating next?",
         )
@@ -125,7 +136,7 @@ class RunnerTests(unittest.TestCase):
         stats = run_once(
             self.settings,
             scratch,
-            InvitingAgent(),
+            ProfileLinkAskingAgent(),
             logging.getLogger("test"),
         )
 
@@ -134,7 +145,10 @@ class RunnerTests(unittest.TestCase):
             scratch.profile_invitation_posts,
             [("Tester", "Hey! What are you creating next?")],
         )
-        self.assertEqual(scratch.posted, [("1", "Sure, I can stop by.")])
+        self.assertEqual(
+            scratch.posted,
+            [("1", "Done, I left a comment on your profile.")],
+        )
 
     def test_explicit_invitation_falls_back_when_model_omits_action(self) -> None:
         comment = CommentRef(
@@ -159,7 +173,35 @@ class RunnerTests(unittest.TestCase):
             scratch.profile_invitation_posts,
             [("Tester", "What are you making in Scratch?")],
         )
-        self.assertEqual(scratch.posted, [("1", "Safe response.")])
+        self.assertEqual(
+            scratch.posted,
+            [("1", "Done, I left a comment on your profile.")],
+        )
+
+    def test_existing_profile_thread_gets_accurate_acknowledgment(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Comment on my profile please",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        scratch.profile_invitation_result = None
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            InvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 0)
+        self.assertEqual(
+            scratch.posted,
+            [("1", "I already have a conversation open on your profile.")],
+        )
 
     def test_model_cannot_redirect_invitation_to_third_party(self) -> None:
         comment = CommentRef(
