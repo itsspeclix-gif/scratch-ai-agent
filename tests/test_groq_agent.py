@@ -4,11 +4,23 @@ import json
 import unittest
 
 from app.config import Settings
-from app.groq_agent import GROQ_CHAT_URL, GroqAgent
+from app.groq_agent import (
+    GROQ_CHAT_URL,
+    MISTRAL_CHAT_URL,
+    ChatAgent,
+    GroqAgent,
+)
+from app.link_context import LinkPreview
 from app.models import CommentRef, ThreadTurn
 
 
 class FakeResponse:
+    def __init__(self, content: dict[str, str] | None = None) -> None:
+        self.content = content or {
+            "reply": "The second level uses the same clone system.",
+            "reason": "follow-up project question",
+        }
+
     def raise_for_status(self) -> None:
         return None
 
@@ -17,12 +29,7 @@ class FakeResponse:
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps(
-                            {
-                                "reply": "The second level uses the same clone system.",
-                                "reason": "follow-up project question",
-                            }
-                        )
+                        "content": json.dumps(self.content)
                     }
                 }
             ]
@@ -30,18 +37,29 @@ class FakeResponse:
 
 
 class FakeHTTPSession:
-    def __init__(self) -> None:
+    def __init__(self, content: dict[str, str] | None = None) -> None:
         self.url = ""
         self.headers: dict[str, str] = {}
         self.payload: dict = {}
         self.timeout = 0
+        self.content = content
 
     def post(self, url: str, *, headers: dict, json: dict, timeout: int) -> FakeResponse:
         self.url = url
         self.headers = headers
         self.payload = json
         self.timeout = timeout
-        return FakeResponse()
+        return FakeResponse(self.content)
+
+
+class FakeLinkInspector:
+    def __init__(self, preview: LinkPreview | None = None) -> None:
+        self.preview = preview
+        self.inputs: list[str] = []
+
+    def inspect_text(self, text: str) -> LinkPreview | None:
+        self.inputs.append(text)
+        return self.preview
 
 
 class GroqAgentTests(unittest.TestCase):
@@ -84,12 +102,146 @@ class GroqAgentTests(unittest.TestCase):
         self.assertIn("Always respond to every supplied message", system_prompt)
         self.assertIn("off-topic messages", system_prompt)
         self.assertIn("Do not begin the reply with @username", system_prompt)
+        self.assertIn("profile_comment", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn("How did you make it?", transcript)
         self.assertIn("I used clones.", transcript)
         self.assertIn("What about level two?", transcript)
         self.assertTrue(decision.should_reply)
+
+    def test_user_link_preview_is_supplied_as_untrusted_context(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession()
+        inspector = FakeLinkInspector(
+            LinkPreview(
+                "https://example.com/game",
+                "Clone Game",
+                "A platformer made with clones.",
+            )
+        )
+
+        ChatAgent(settings, http=http, link_inspector=inspector).generate(
+            CommentRef(
+                "1",
+                "Tester",
+                "What do you think? https://example.com/game",
+                None,
+                object(),
+            )
+        )
+
+        supplied = http.payload["messages"][1]["content"]
+        self.assertIn("optional linked-page text", supplied)
+        self.assertIn("Clone Game", supplied)
+        self.assertIn("A platformer made with clones.", supplied)
+        self.assertEqual(
+            inspector.inputs,
+            ["What do you think? https://example.com/game"],
+        )
+
+    def test_profile_invitation_action_is_parsed(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession(
+            {
+                "reply": "Sure, I can stop by.",
+                "reason": "explicit profile invitation",
+                "profile_comment": "Hey! What are you creating next?",
+            }
+        )
+
+        decision = ChatAgent(
+            settings,
+            http=http,
+            link_inspector=FakeLinkInspector(),
+        ).generate(
+            CommentRef(
+                "1",
+                "Tester",
+                "Can you comment on my profile?",
+                None,
+                object(),
+            )
+        )
+
+        self.assertEqual(
+            decision.profile_comment,
+            "Hey! What are you creating next?",
+        )
+
+    def test_outreach_request_uses_separate_opening_prompt(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession()
+
+        decision = GroqAgent(settings, http=http).generate_outreach("Tester")
+
+        system_prompt = http.payload["messages"][0]["content"]
+        self.assertIn("opening profile comment", system_prompt)
+        self.assertIn("Do not claim to have inspected", system_prompt)
+        self.assertIn("Tester", http.payload["messages"][1]["content"])
+        self.assertTrue(decision.should_reply)
+
+    def test_mistral_provider_uses_pinned_model_and_direct_endpoint(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="groq-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+            ai_provider="mistral",
+            mistral_api_key="mistral-key",
+            mistral_model="mistral-medium-3-5",
+        )
+        http = FakeHTTPSession()
+
+        ChatAgent(settings, http=http).generate(
+            CommentRef("1", "Tester", "Hello", None, object())
+        )
+
+        self.assertEqual(http.url, MISTRAL_CHAT_URL)
+        self.assertEqual(
+            http.headers["Authorization"],
+            "Bearer mistral-key",
+        )
+        self.assertEqual(
+            http.payload["model"],
+            "mistral-medium-3-5",
+        )
+        self.assertEqual(http.payload["reasoning_effort"], "none")
 
 
 if __name__ == "__main__":

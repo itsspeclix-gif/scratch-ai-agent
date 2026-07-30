@@ -23,11 +23,18 @@ jobs:
       SCRATCH_USERNAME: ${{ secrets.SCRATCH_USERNAME }}
       SCRATCH_SESSION_STRING: ${{ secrets.SCRATCH_SESSION_STRING }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       BOT_MODE: private
       AUDIENCE_MODE: everyone
+      AI_PROVIDER: ${{ vars.AI_PROVIDER || 'groq' }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL || 'qwen/qwen3.6-27b' }}
+      MISTRAL_MODEL: ${{ vars.MISTRAL_MODEL || 'mistral-medium-3-5' }}
       MAX_REPLY_CHARS: ${{ vars.MAX_REPLY_CHARS || '500' }}
       PERSONA_FILE: ${{ vars.PERSONA_FILE || 'persona.txt' }}
+      OUTREACH_ENABLED: ${{ vars.OUTREACH_ENABLED || 'false' }}
+      OUTREACH_USERS_FILE: ${{ vars.OUTREACH_USERS_FILE || 'config/outreach_users.txt' }}
+      OUTREACH_INTERVAL_MINUTES: ${{ vars.OUTREACH_INTERVAL_MINUTES || '480' }}
+      FULL_SCAN_INTERVAL_MINUTES: ${{ vars.FULL_SCAN_INTERVAL_MINUTES || '360' }}
 
     steps:
       - name: Check out repository

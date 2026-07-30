@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.models import CommentRef
-from app.policy import check_incoming, check_reply
+from app.policy import check_incoming, check_reply, is_explicit_profile_invitation
 
 
 class PolicyTests(unittest.TestCase):
@@ -28,6 +28,23 @@ class PolicyTests(unittest.TestCase):
         comment = CommentRef("1", "Anyone", "Hello", None, object())
         result = check_incoming(comment, "everyone", frozenset())
         self.assertTrue(result.allowed)
+
+    def test_explicit_self_profile_invitation_is_detected(self) -> None:
+        self.assertTrue(
+            is_explicit_profile_invitation(
+                "Could you come leave a comment on my Scratch profile?"
+            )
+        )
+
+    def test_third_party_profile_request_is_not_an_invitation(self) -> None:
+        self.assertFalse(
+            is_explicit_profile_invitation("Go comment on OtherUser's profile")
+        )
+
+    def test_negated_profile_invitation_is_not_detected(self) -> None:
+        self.assertFalse(
+            is_explicit_profile_invitation("Please don't comment on my profile")
+        )
 
 
 if __name__ == "__main__":

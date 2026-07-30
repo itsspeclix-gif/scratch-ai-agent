@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -109,6 +110,9 @@ class ScratchClient:
             ("profile", settings.scratch_username.casefold()): self._user,
         }
         self._profile_user_ids: dict[str, Any] = {}
+        self._unread_message_count = 0
+        self._notification_scan_complete = True
+        self._prepared_outreach: str | None = None
 
     @staticmethod
     def _id_sort_key(raw_id: Any) -> tuple[int, str]:
@@ -314,7 +318,148 @@ class ScratchClient:
                     return root
             page_number += 1
 
-    def conversation_targets(self) -> list[CommentRef]:
+    def _profile_root_containing(
+        self,
+        source: Any,
+        comment_id: str,
+    ) -> Any | None:
+        page_number = 1
+        while True:
+            roots = self._fresh_profile_page(source, page_number)
+            if not roots:
+                return None
+            for root in roots:
+                if str(root.id) == str(comment_id):
+                    return root
+                if any(
+                    str(reply.id) == str(comment_id)
+                    for reply in self._all_replies(root)
+                ):
+                    return root
+            page_number += 1
+
+    def _connect_source(self, source_type: str, source_id: str) -> Any:
+        source_key = (
+            source_type,
+            source_id.casefold() if source_type == "profile" else source_id,
+        )
+        source = self._sources.get(source_key)
+        if source is not None:
+            return source
+        if source_type == "profile":
+            source = self._session.connect_user(source_id)
+        elif source_type == "project":
+            source = self._session.connect_project(source_id)
+        else:
+            raise ValueError(f"Unsupported Scratch source type: {source_type}")
+        self._sources[source_key] = source
+        return source
+
+    def _notification_target(self, message: Any) -> CommentRef | None:
+        if str(getattr(message, "type", "")).lower() != "addcomment":
+            return None
+
+        try:
+            comment_type = int(getattr(message, "comment_type", -1))
+        except (TypeError, ValueError):
+            return None
+        comment_id = str(getattr(message, "comment_id", "") or "")
+        if not comment_id:
+            return None
+
+        if comment_type == 0:
+            source_type = "project"
+            source_id = str(getattr(message, "comment_obj_id", "") or "")
+        elif comment_type == 1:
+            source_type = "profile"
+            source_id = str(getattr(message, "comment_obj_title", "") or "")
+        else:
+            return None
+        if not source_id:
+            return None
+
+        source = self._connect_source(source_type, source_id)
+        if source_type == "profile":
+            root = self._profile_root_containing(source, comment_id)
+        else:
+            notified_comment = source.comment_by_id(comment_id)
+            parent_id = getattr(notified_comment, "parent_id", None)
+            root_id = (
+                comment_id
+                if parent_id in (None, "", 0, "0")
+                else str(parent_id)
+            )
+            root = source.comment_by_id(root_id)
+        if root is None:
+            logger.info(
+                "notification comment no longer exists source=%s id=%s",
+                source_id,
+                comment_id,
+            )
+            return None
+
+        candidate = self._candidate_from_root(
+            root,
+            source_type=source_type,
+            source_id=source_id,
+        )
+        if candidate is None:
+            return None
+
+        bot_name = self._settings.scratch_username.casefold()
+        if source_type == "profile":
+            source_is_owned = source_id.casefold() == bot_name
+        else:
+            source_is_owned = (
+                str(getattr(source, "author_name", "")).casefold() == bot_name
+            )
+        bot_participated = any(
+            turn.author.casefold() == bot_name
+            for turn in candidate.thread
+        )
+        if not source_is_owned and not bot_participated:
+            logger.info(
+                "skip unrelated external notification source=%s comment=%s",
+                source_id,
+                comment_id,
+            )
+            return None
+        return candidate
+
+    def _notification_targets(self) -> list[CommentRef]:
+        self._notification_scan_complete = True
+        self._unread_message_count = int(self._session.message_count())
+        if self._unread_message_count <= 0:
+            return []
+
+        try:
+            messages = list(
+                self._session.messages(limit=self._unread_message_count) or []
+            )
+        except Exception:
+            self._notification_scan_complete = False
+            logger.exception("failed loading Scratch notifications")
+            return []
+
+        result: list[CommentRef] = []
+        for message in messages:
+            try:
+                candidate = self._notification_target(message)
+                if candidate is not None:
+                    result.append(candidate)
+            except Exception:
+                self._notification_scan_complete = False
+                logger.exception(
+                    "failed resolving Scratch notification comment=%s",
+                    getattr(message, "comment_id", "unknown"),
+                )
+        return result
+
+    def _full_scan_due(self) -> bool:
+        minute = int(time.time() // 60)
+        return minute % self._settings.full_scan_interval_minutes == 0
+
+    def _full_scan_targets(self) -> list[CommentRef]:
         result: list[CommentRef] = []
         sources: list[tuple[str, str, Any]] = [
             ("profile", self._settings.scratch_username.casefold(), self._user)
@@ -322,6 +467,13 @@ class ScratchClient:
         for project in self._projects():
             project_id = str(project.id)
             sources.append(("project", project_id, project))
+
+        bot_name = self._settings.scratch_username.casefold()
+        for username in self._settings.outreach_users:
+            if username.casefold() == bot_name:
+                continue
+            source = self._connect_source("profile", username)
+            sources.append(("profile", username.casefold(), source))
 
         for source_type, source_id, source in sources:
             source_key = (source_type, source_id)
@@ -341,6 +493,12 @@ class ScratchClient:
                     parent = getattr(root, "parent_id", None)
                     if parent not in (None, "", 0, "0"):
                         continue
+                    if (
+                        source_type == "profile"
+                        and source_id != bot_name
+                        and str(root.author_name).casefold() != bot_name
+                    ):
+                        continue
                     candidate = self._candidate_from_root(
                         root,
                         source_type=source_type,
@@ -355,12 +513,56 @@ class ScratchClient:
                         source_id,
                         getattr(root, "id", "unknown"),
                     )
+        return result
 
+    def conversation_targets(self) -> list[CommentRef]:
+        result = self._notification_targets()
+        if self._full_scan_due():
+            logger.info("running periodic full conversation scan")
+            result.extend(self._full_scan_targets())
+
+        deduplicated: dict[tuple[str, str, str, str], CommentRef] = {}
+        for comment in result:
+            source_id = comment.source_id or ""
+            if comment.source == "profile":
+                source_id = source_id.casefold()
+            key = (
+                comment.source,
+                source_id,
+                comment.root_id or comment.id,
+                comment.id,
+            )
+            deduplicated[key] = comment
+        result = list(deduplicated.values())
         result.sort(
             key=lambda comment: self._id_sort_key(comment.id),
             reverse=True,
         )
         return result
+
+    def finish_notification_batch(self, success: bool) -> None:
+        if self._unread_message_count <= 0:
+            return
+        if not success or not self._notification_scan_complete:
+            logger.warning(
+                "leaving %d Scratch notifications unread for retry",
+                self._unread_message_count,
+            )
+            return
+        current_count = int(self._session.message_count())
+        if current_count != self._unread_message_count:
+            logger.info(
+                "notification count changed from %d to %d; deferring clear",
+                self._unread_message_count,
+                current_count,
+            )
+            return
+        self._session.clear_messages()
+        logger.info(
+            "marked %d Scratch notifications as read",
+            self._unread_message_count,
+        )
+        self._unread_message_count = 0
 
     def is_current_target(self, comment: CommentRef) -> bool:
         source_id = comment.source_id or ""
@@ -402,6 +604,64 @@ class ScratchClient:
             self._profile_user_ids[username_key] = author_id
         return self._profile_user_ids[username_key]
 
+    def _post_profile_comment(
+        self,
+        profile_username: str,
+        text: str,
+        *,
+        parent_id: str = "",
+        commentee_id: Any = "",
+    ) -> str:
+        url = (
+            "https://scratch.mit.edu/site-api/comments/user/"
+            f"{profile_username}/add/"
+        )
+        headers = dict(getattr(self._session, "_headers", {}))
+        headers["Referer"] = f"https://scratch.mit.edu/users/{profile_username}/"
+        response = requests.post(
+            url,
+            headers=headers,
+            cookies=getattr(self._session, "_cookies", {}),
+            data=json.dumps(
+                {
+                    "commentee_id": commentee_id,
+                    "content": text,
+                    "parent_id": parent_id,
+                }
+            ),
+            timeout=30,
+        )
+
+        if response.status_code == 429:
+            raise RuntimeError("Scratch rate-limited the profile comment")
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(
+                "Scratch rejected the profile comment "
+                f"(HTTP {response.status_code})"
+            )
+
+        parser = _ProfilePostParser()
+        parser.feed(response.text)
+        if parser.created_comment_id is not None:
+            return parser.created_comment_id
+
+        error_message = ""
+        if parser.error_data.strip():
+            try:
+                error_body = json.loads(parser.error_data)
+            except json.JSONDecodeError:
+                error_message = parser.error_data.strip()
+            else:
+                if isinstance(error_body, dict):
+                    error_message = str(
+                        error_body.get("message")
+                        or error_body.get("error")
+                        or error_body
+                    )
+        if not error_message:
+            error_message = "Scratch returned no created comment"
+        raise RuntimeError(f"Profile comment was not accepted: {error_message[:200]}")
+
     def _post_profile_reply(
         self,
         comment: CommentRef,
@@ -428,62 +688,96 @@ class ScratchClient:
                 comment.root_id,
                 parent_id,
             )
-        url = (
-            "https://scratch.mit.edu/site-api/comments/user/"
-            f"{profile_username}/add/"
+        created_comment_id = self._post_profile_comment(
+            profile_username,
+            text,
+            parent_id=parent_id,
+            commentee_id=commentee_id,
         )
-        headers = dict(getattr(self._session, "_headers", {}))
-        headers["Referer"] = f"https://scratch.mit.edu/users/{profile_username}/"
-        response = requests.post(
-            url,
-            headers=headers,
-            cookies=getattr(self._session, "_cookies", {}),
-            data=json.dumps(
-                {
-                    "commentee_id": commentee_id,
-                    "content": text,
-                    "parent_id": parent_id,
-                }
-            ),
-            timeout=30,
+        logger.info(
+            "profile reply accepted source_comment=%s created_comment=%s parent=%s",
+            comment.id,
+            created_comment_id,
+            parent_id,
         )
 
-        if response.status_code == 429:
-            raise RuntimeError("Scratch rate-limited the profile reply")
-        if not 200 <= response.status_code < 300:
-            raise RuntimeError(
-                "Scratch rejected the profile reply "
-                f"(HTTP {response.status_code})"
-            )
+    def start_profile_invitation(self, username: str, text: str) -> str | None:
+        if username.casefold() == self._settings.scratch_username.casefold():
+            return None
 
-        parser = _ProfilePostParser()
-        parser.feed(response.text)
-        if parser.created_comment_id is not None:
+        source = self._connect_source("profile", username)
+        bot_name = self._settings.scratch_username.casefold()
+        if any(
+            str(root.author_name).casefold() == bot_name
+            for root in self._roots("profile", source)
+        ):
             logger.info(
-                "profile reply accepted source_comment=%s created_comment=%s "
-                "parent=%s",
-                comment.id,
-                parser.created_comment_id,
-                parent_id,
+                "skip profile invitation user=%s reason=existing bot conversation",
+                username,
             )
-            return
+            return None
 
-        error_message = ""
-        if parser.error_data.strip():
-            try:
-                error_body = json.loads(parser.error_data)
-            except json.JSONDecodeError:
-                error_message = parser.error_data.strip()
-            else:
-                if isinstance(error_body, dict):
-                    error_message = str(
-                        error_body.get("message")
-                        or error_body.get("error")
-                        or error_body
-                    )
-        if not error_message:
-            error_message = "Scratch returned no created comment"
-        raise RuntimeError(f"Profile reply was not accepted: {error_message[:200]}")
+        text = _strip_leading_author_mentions(text, username)
+        if not text:
+            raise RuntimeError(
+                "Invited profile comment contains only a recipient mention"
+            )
+        created_comment_id = self._post_profile_comment(username, text)
+        logger.info(
+            "profile invitation posted user=%s created_comment=%s",
+            username,
+            created_comment_id,
+        )
+        return created_comment_id
+
+    def outreach_candidate(self) -> str | None:
+        users = [
+            username
+            for username in self._settings.outreach_users
+            if username.casefold()
+            != self._settings.scratch_username.casefold()
+        ]
+        if not users:
+            return None
+
+        minute = int(time.time() // 60)
+        if minute % self._settings.outreach_interval_minutes != 0:
+            return None
+        slot = minute // self._settings.outreach_interval_minutes
+        seed = f"{self._settings.scratch_username.casefold()}:{slot}".encode()
+        index = int.from_bytes(hashlib.sha256(seed).digest()[:8], "big") % len(users)
+        username = users[index]
+        source = self._connect_source("profile", username)
+        bot_name = self._settings.scratch_username.casefold()
+        if any(
+            str(root.author_name).casefold() == bot_name
+            for root in self._roots("profile", source)
+        ):
+            logger.info(
+                "skip outreach user=%s reason=existing bot conversation",
+                username,
+            )
+            return None
+        self._prepared_outreach = username
+        return username
+
+    def start_outreach(self, username: str, text: str) -> str:
+        if (
+            self._prepared_outreach is None
+            or username.casefold() != self._prepared_outreach.casefold()
+        ):
+            raise RuntimeError("Outreach user was not prepared for this run")
+        text = _strip_leading_author_mentions(text, username)
+        if not text:
+            raise RuntimeError("Outreach comment contains only a recipient mention")
+        created_comment_id = self._post_profile_comment(username, text)
+        self._prepared_outreach = None
+        logger.info(
+            "outreach posted user=%s created_comment=%s",
+            username,
+            created_comment_id,
+        )
+        return created_comment_id
 
     def reply(self, comment: CommentRef, text: str) -> None:
         text = _strip_leading_author_mentions(text, comment.author)

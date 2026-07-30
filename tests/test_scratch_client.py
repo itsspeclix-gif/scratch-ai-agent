@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.config import Settings
@@ -375,6 +376,35 @@ class FakeUser:
         raise AssertionError("profile rechecks must not use scratchattach.comment_by_id")
 
 
+class FakeSession:
+    _headers = {"X-Token": "token"}
+    _cookies = {"scratchsessionsid": "session"}
+
+    def __init__(
+        self,
+        messages: list[object] | None = None,
+        users: dict[str, object] | None = None,
+    ) -> None:
+        self._messages = messages or []
+        self._users = {
+            username.casefold(): user
+            for username, user in (users or {}).items()
+        }
+        self.cleared = 0
+
+    def message_count(self) -> int:
+        return len(self._messages)
+
+    def messages(self, *, limit: int) -> list[object]:
+        return self._messages[:limit]
+
+    def clear_messages(self) -> None:
+        self.cleared += 1
+
+    def connect_user(self, username: str) -> object:
+        return self._users[username.casefold()]
+
+
 class ScratchClientDiscoveryTests(unittest.TestCase):
     def test_discovers_profile_and_every_project_page(self) -> None:
         settings = Settings(
@@ -387,6 +417,7 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             bot_mode="private",
             max_reply_chars=500,
             persona="Test",
+            full_scan_interval_minutes=1,
         )
         profile_root = FakeComment(
             10,
@@ -412,8 +443,11 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         user = FakeUser(projects, {1: [profile_root]})
         client = ScratchClient.__new__(ScratchClient)
         client._settings = settings
+        client._session = FakeSession()
         client._user = user
         client._sources = {("profile", "bot"): user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
 
         with (
             patch("app.scratch_client.PAGE_SIZE", 2),
@@ -438,6 +472,283 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             side_effect=lambda source, page: source.comments(page=page),
         ):
             self.assertTrue(client.is_current_target(targets[2]))
+
+    def test_notification_finds_reply_on_another_users_profile(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+            full_scan_interval_minutes=360,
+        )
+        reply = FakeComment(
+            12,
+            "User",
+            "@Bot What are you making?",
+            parent_id=10,
+            source="profile",
+            source_id="Other",
+        )
+        root = FakeComment(
+            10,
+            "Bot",
+            "What kind of Scratch projects do you enjoy?",
+            replies=[reply],
+            source="profile",
+            source_id="Other",
+        )
+        external_user = FakeUser([], {1: [root], 2: []})
+        external_user.username = "Other"
+        message = SimpleNamespace(
+            type="addcomment",
+            comment_type=1,
+            comment_id=12,
+            comment_obj_title="Other",
+        )
+        session = FakeSession([message], {"Other": external_user})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        with (
+            patch.object(client, "_full_scan_due", return_value=False),
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+        ):
+            targets = client.conversation_targets()
+
+        self.assertEqual([target.id for target in targets], ["12"])
+        self.assertEqual(targets[0].source_id, "Other")
+        client.finish_notification_batch(success=True)
+        self.assertEqual(session.cleared, 1)
+
+    def test_external_notification_without_bot_participation_is_ignored(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        root = FakeComment(
+            12,
+            "User",
+            "Unrelated conversation",
+            source="profile",
+            source_id="Other",
+        )
+        external_user = FakeUser([], {1: [root], 2: []})
+        external_user.username = "Other"
+        message = SimpleNamespace(
+            type="addcomment",
+            comment_type=1,
+            comment_id=12,
+            comment_obj_title="Other",
+        )
+        session = FakeSession([message], {"Other": external_user})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        with (
+            patch.object(client, "_full_scan_due", return_value=False),
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+        ):
+            self.assertEqual(client.conversation_targets(), [])
+
+    def test_notification_clear_waits_when_new_message_arrives(self) -> None:
+        session = FakeSession([object()])
+        client = ScratchClient.__new__(ScratchClient)
+        client._session = session
+        client._unread_message_count = 1
+        client._notification_scan_complete = True
+        session._messages.append(object())
+
+        client.finish_notification_batch(success=True)
+
+        self.assertEqual(session.cleared, 0)
+
+    def test_outreach_posts_without_following(self) -> None:
+        events: list[str] = []
+
+        class OutreachUser(FakeUser):
+            username = "Other"
+
+            def follow(self) -> None:
+                events.append("follow")
+
+        class SuccessfulResponse:
+            status_code = 200
+            text = '<div class="comment" data-comment-id="99"></div>'
+
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+            outreach_users=("Other",),
+            outreach_interval_minutes=10,
+        )
+        external_user = OutreachUser([], {1: []})
+        session = FakeSession(users={"Other": external_user})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        def post(*args: object, **kwargs: object) -> SuccessfulResponse:
+            events.append("post")
+            return SuccessfulResponse()
+
+        with (
+            patch("app.scratch_client.time.time", return_value=600),
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+            patch("app.scratch_client.requests.post", side_effect=post) as request,
+        ):
+            self.assertEqual(client.outreach_candidate(), "Other")
+            created_id = client.start_outreach(
+                "Other",
+                "What are you creating in Scratch?",
+            )
+
+        self.assertEqual(created_id, "99")
+        self.assertEqual(events, ["post"])
+        payload = json.loads(request.call_args.kwargs["data"])
+        self.assertEqual(payload["parent_id"], "")
+        self.assertEqual(payload["commentee_id"], "")
+
+    def test_invited_profile_comment_posts_without_following(self) -> None:
+        events: list[str] = []
+
+        class InvitingUser(FakeUser):
+            username = "Other"
+
+            def follow(self) -> None:
+                events.append("follow")
+
+        class SuccessfulResponse:
+            status_code = 200
+            text = '<div class="comment" data-comment-id="101"></div>'
+
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        external_user = InvitingUser([], {1: []})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = FakeSession(users={"Other": external_user})
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        def post(*args: object, **kwargs: object) -> SuccessfulResponse:
+            events.append("post")
+            return SuccessfulResponse()
+
+        with (
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+            patch("app.scratch_client.requests.post", side_effect=post),
+        ):
+            created_id = client.start_profile_invitation(
+                "Other",
+                "Hey! What are you creating next?",
+            )
+
+        self.assertEqual(created_id, "101")
+        self.assertEqual(events, ["post"])
+
+    def test_invited_profile_comment_skips_existing_bot_thread(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        existing_root = FakeComment(
+            10,
+            "Bot",
+            "Existing conversation",
+            source="profile",
+            source_id="Other",
+        )
+        external_user = FakeUser([], {1: [existing_root]})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = FakeSession(users={"Other": external_user})
+        client._user = FakeUser([], {})
+        client._sources = {("profile", "bot"): client._user}
+        client._profile_user_ids = {}
+        client._prepared_outreach = None
+
+        with (
+            patch.object(
+                client,
+                "_fresh_profile_page",
+                side_effect=lambda source, page: source.comments(page=page),
+            ),
+            patch("app.scratch_client.requests.post") as post,
+        ):
+            created_id = client.start_profile_invitation(
+                "Other",
+                "Hey! What are you creating next?",
+            )
+
+        self.assertIsNone(created_id)
+        post.assert_not_called()
 
     def test_missing_profile_root_is_stale_instead_of_erroring(self) -> None:
         settings = Settings(

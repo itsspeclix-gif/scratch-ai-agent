@@ -31,6 +31,7 @@ class AgentDecision:
     should_reply: bool
     reply: str
     reason: str
+    profile_comment: str = ""
 
 
 @dataclass(frozen=True)
@@ -48,4 +49,8 @@ class RunStats:
     skipped_by_agent: int = 0
     simulated: int = 0
     posted: int = 0
+    profile_invites_simulated: int = 0
+    profile_invites_posted: int = 0
+    outreach_simulated: int = 0
+    outreach_posted: int = 0
     errors: int = 0

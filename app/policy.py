@@ -20,6 +20,29 @@ SEVERE_CONTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+SELF_PROFILE_RE = re.compile(
+    r"\b(?:my|on my)\s+(?:scratch\s+)?(?:profile|page)\b",
+    re.IGNORECASE,
+)
+PROFILE_INVITE_ACTION_RE = re.compile(
+    r"\b(?:comment|post|leave|visit|come|stop by|drop by|"
+    r"say (?:hi|hello)|check out)\b",
+    re.IGNORECASE,
+)
+NEGATED_PROFILE_INVITE_RE = re.compile(
+    r"\b(?:do not|don't|dont|never|stop|not)\b.{0,35}"
+    r"\b(?:comment|post|visit|come|stop by|drop by|check out)\b",
+    re.IGNORECASE,
+)
+
+
+def is_explicit_profile_invitation(text: str) -> bool:
+    return bool(
+        SELF_PROFILE_RE.search(text)
+        and PROFILE_INVITE_ACTION_RE.search(text)
+        and not NEGATED_PROFILE_INVITE_RE.search(text)
+    )
+
 
 def check_incoming(
     comment: CommentRef,

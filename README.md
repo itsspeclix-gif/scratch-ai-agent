@@ -1,6 +1,8 @@
 # Scratch AI Agent - Version 2.0
 
-This project runs a Groq-hosted Llama model as a supervised Scratch account agent. It checks the account profile and every shared project, reads complete conversation threads, and can reply to each unanswered user message.
+This project runs a Groq- or Mistral-hosted model as a supervised Scratch
+account agent. It reads comment notifications, fetches complete conversation
+threads, and can reply to each unanswered user message.
 
 ## Operating modes
 
@@ -36,19 +38,66 @@ Follow `cloudflare-scheduler/README.md` to create a repository-scoped GitHub
 token, deploy the Worker, test one dispatch, and disable the native GitHub
 schedule. Keep `CLOUDFLARE_SCHEDULER_ENABLED` unset until that test succeeds.
 
-## Account-wide conversations
+## Notification-driven conversations
 
-Version 2.0 discovers every shared project owned by `SCRATCH_USERNAME` automatically. It also checks comments on the account profile, so no project ID or project allowlist is required.
+Every run reads the account's unread Scratch notifications. Comment
+notifications identify the profile or project and comment ID, so the agent
+fetches only the referenced conversation instead of scanning every project
+every minute. After the complete notification batch succeeds, the notifications
+are marked as read. A failed batch remains unread for the next run.
 
-For each top-level thread, the agent:
+The agent supports comments on its own profile and projects. It can also handle
+replies to conversations it started on opted-in users' profiles. Notifications
+from unrelated conversations on other accounts are ignored.
+
+For each referenced top-level thread, the agent:
 
 1. Reads the root comment and every page of its replies.
 2. Finds the newest comment not written by the bot.
 3. Skips the thread when the bot has already replied after that comment.
-4. Sends the complete thread history to Groq.
+4. Sends the complete thread history to the selected AI provider.
 5. Replies directly to the newest user comment.
 
 Scratch displays replies under one top-level comment rather than as deeply nested branches. The agent therefore treats each top-level comment and all its replies as one ordered conversation.
+
+When the newest comment contains a web link, the agent may inspect the first
+public HTTP or HTTPS page and give the model only its title and a short text
+summary. Link fetching blocks private network addresses, revalidates redirects,
+accepts text formats only, and stops after 32 KiB. Page text is treated as
+untrusted conversation context and cannot change the bot's rules.
+
+Every `FULL_SCAN_INTERVAL_MINUTES` (six hours by default), the agent performs a
+recovery scan of its own profile, all owned projects, and bot-started threads on
+listed outreach profiles. This catches conversations missed during API failures
+or deployment downtime.
+
+## Opt-in outreach
+
+Add one consenting Scratch username per line to
+`config/outreach_users.txt`. Blank lines and lines beginning with `#` are
+ignored. Usernames are validated and deduplicated case-insensitively.
+Outreach defaults to disabled, so committing a populated list does not contact
+anyone. Set the GitHub Actions variable `OUTREACH_ENABLED=true` only when you
+are ready to activate it.
+
+At most once per `OUTREACH_INTERVAL_MINUTES` (eight hours by default), the agent:
+
+1. Deterministically selects one username from the list for that time slot.
+2. Skips the user if the bot has already started a profile conversation there.
+3. Generates and safety-checks one short Scratch conversation starter.
+4. Posts the opening profile comment without changing follow status.
+
+Each user receives at most one bot-started conversation; subsequent messages
+happen only as replies in that thread.
+
+## Profile invitations
+
+Any eligible commenter can explicitly invite the bot to leave a comment on
+their own profile or page. The model proposes a separate profile comment, and
+the runner acts only when the newest message contains an explicit self-profile
+invitation. The requesting comment's author is always the destination; requests
+to target another username are ignored. The bot never follows the user and
+does not create another top-level thread if it already started one there.
 
 ## Personality
 
@@ -68,15 +117,24 @@ Avoid putting secrets or private information in `persona.txt` because it is comm
 These may be added under `Settings → Secrets and variables → Actions → Variables`:
 
 - `MAX_REPLY_CHARS=500`: maximum generated reply length, kept within Scratch's comment field.
+- `AI_PROVIDER=groq`: use `groq` or `mistral`.
 - `GROQ_MODEL=qwen/qwen3.6-27b`: Groq model.
+- `MISTRAL_MODEL=mistral-medium-3-5`: pinned direct Mistral model.
+- `OUTREACH_USERS_FILE=config/outreach_users.txt`: opt-in outreach list.
+- `OUTREACH_ENABLED=false`: explicit proactive outreach kill switch.
+- `OUTREACH_INTERVAL_MINUTES=480`: at most three outreach attempts per day.
+- `FULL_SCAN_INTERVAL_MINUTES=360`: periodic recovery scan interval.
 
-There is no configured cap on projects, top-level threads, reply pages, thread history, or replies per run. The agent processes all eligible unanswered conversations it discovers.
+There is no configured cap on projects, top-level threads, reply pages, thread
+history, or replies found in a notification batch. Proactive outreach is
+intentionally limited to one selected user per configured time slot.
 
 ## Required GitHub secrets
 
 - `SCRATCH_USERNAME`
 - `SCRATCH_SESSION_STRING`
 - `GROQ_API_KEY`
+- `MISTRAL_API_KEY` when `AI_PROVIDER=mistral`
 
 `ALLOWED_USERS` is required only when `AUDIENCE_MODE=allowlist`.
 
@@ -103,7 +161,12 @@ Use `BOT_MODE=simulate` before changing to `private`.
 
 ## Duplicate prevention
 
-GitHub Actions starts from a clean machine on each run, so the bot does not rely on a local database. It uses the Scratch thread itself as the source of truth. Immediately before posting, it reloads the thread and confirms that the same user comment is still the newest unanswered target.
+GitHub Actions starts from a clean machine on each run, so the bot does not rely
+on a local database. It uses the unread notification count and Scratch threads
+as its source of truth. Immediately before replying, it reloads the thread and
+confirms that the same user comment is still the newest unanswered target.
+Already-posted replies are therefore not duplicated when an unread batch is
+retried.
 
 ## Scope
 
@@ -111,13 +174,21 @@ Version 2.0 supports:
 
 - every shared project owned by the bot account
 - profile comments
+- notification-driven replies
+- replies to bot-started threads on opted-in users' profiles
+- one-at-a-time profile outreach from `config/outreach_users.txt`
+- explicit author-only profile invitations
+- bounded context from the first public link in a comment
 - any audience or an allowlist
 - top-level comments and follow-up replies
 - complete thread context
 - all eligible replies found in each run
 - GitHub execution requested every minute through Cloudflare
+- six-hour periodic reconciliation scans
 - editable account personality
 
-It does not initiate conversations, follow users, join studios, create projects, or maintain long-term memory across separate Scratch threads.
+It does not join studios, create projects, contact an unlisted profile without
+that author's explicit invitation, or maintain long-term memory across separate
+Scratch threads.
 
 `scratchattach` is an unofficial Scratch API wrapper. Scratch may change its site behavior and break the integration. Scratch-specific code remains isolated in `app/scratch_client.py`.

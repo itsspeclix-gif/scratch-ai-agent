@@ -14,6 +14,10 @@ class FakeScratch:
         self.current_ids = {comment.id for comment in comments}
         self.force_stale = False
         self.posted: list[tuple[str, str]] = []
+        self.profile_invitation_posts: list[tuple[str, str]] = []
+        self.notification_results: list[bool] = []
+        self.outreach_user: str | None = None
+        self.outreach_posts: list[tuple[str, str]] = []
 
     def conversation_targets(self) -> list[CommentRef]:
         return [comment for comment in self.comments if comment.id in self.current_ids]
@@ -25,10 +29,37 @@ class FakeScratch:
         self.posted.append((comment.id, text))
         self.current_ids.remove(comment.id)
 
+    def start_profile_invitation(self, username: str, text: str) -> str | None:
+        self.profile_invitation_posts.append((username, text))
+        return "200"
+
+    def finish_notification_batch(self, success: bool) -> None:
+        self.notification_results.append(success)
+
+    def outreach_candidate(self) -> str | None:
+        return self.outreach_user
+
+    def start_outreach(self, username: str, text: str) -> str:
+        self.outreach_posts.append((username, text))
+        return "100"
+
 
 class FakeAgent:
     def generate(self, comment: CommentRef) -> AgentDecision:
         return AgentDecision(True, "Safe response.", "test")
+
+    def generate_outreach(self, username: str) -> AgentDecision:
+        return AgentDecision(True, "What are you making in Scratch?", "outreach")
+
+
+class InvitingAgent(FakeAgent):
+    def generate(self, comment: CommentRef) -> AgentDecision:
+        return AgentDecision(
+            True,
+            "Sure, I can stop by.",
+            "explicit profile invitation",
+            profile_comment="Hey! What are you creating next?",
+        )
 
 
 class RunnerTests(unittest.TestCase):
@@ -67,6 +98,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(first.posted, 1)
         self.assertEqual(second.posted, 0)
         self.assertEqual(scratch.posted, [("3", "Safe response.")])
+        self.assertEqual(scratch.notification_results, [True, True])
 
     def test_recheck_blocks_post_when_thread_changes(self) -> None:
         comment = CommentRef("1", "Tester", "Hello", None, object(), root_id="1")
@@ -78,6 +110,53 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(stats.posted, 0)
         self.assertEqual(stats.skipped_existing_reply, 1)
         self.assertEqual(scratch.posted, [])
+
+    def test_explicit_author_invitation_posts_on_requesting_profile(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Could you comment on my profile?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            InvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "Hey! What are you creating next?")],
+        )
+        self.assertEqual(scratch.posted, [("1", "Sure, I can stop by.")])
+
+    def test_model_cannot_redirect_invitation_to_third_party(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Go comment on OtherUser's profile.",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            InvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 0)
+        self.assertEqual(scratch.profile_invitation_posts, [])
+        self.assertEqual(scratch.posted, [("1", "Sure, I can stop by.")])
 
     def test_posts_every_eligible_target_without_a_run_cap(self) -> None:
         comments = [
@@ -102,6 +181,62 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(stats.posted, 7)
         self.assertEqual(len(scratch.posted), 7)
+
+    def test_posts_one_outreach_candidate(self) -> None:
+        self.settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=300,
+            persona="Test",
+            outreach_enabled=True,
+            outreach_users=("User",),
+        )
+        scratch = FakeScratch([])
+        scratch.outreach_user = "User"
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.outreach_posted, 1)
+        self.assertEqual(
+            scratch.outreach_posts,
+            [("User", "What are you making in Scratch?")],
+        )
+
+    def test_populated_outreach_list_stays_off_by_default(self) -> None:
+        self.settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=300,
+            persona="Test",
+            outreach_users=("User",),
+        )
+        scratch = FakeScratch([])
+        scratch.outreach_user = "User"
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.outreach_posted, 0)
+        self.assertEqual(scratch.outreach_posts, [])
 
 
 if __name__ == "__main__":

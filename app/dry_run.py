@@ -38,10 +38,22 @@ class FakeScratch:
         self.posted.append((comment.id, text))
         self._active.remove(comment.id)
 
+    def finish_notification_batch(self, success: bool) -> None:
+        return None
+
+    def outreach_candidate(self) -> str | None:
+        return None
+
+    def start_outreach(self, username: str, text: str) -> str:
+        raise AssertionError("dry run has no outreach users")
+
 
 class FakeAgent:
     def generate(self, comment: CommentRef) -> AgentDecision:
         return AgentDecision(True, "Yes. I reuse the same clone movement and change the level data.", "follow-up")
+
+    def generate_outreach(self, username: str) -> AgentDecision:
+        raise AssertionError("dry run has no outreach users")
 
 
 def main() -> None:
