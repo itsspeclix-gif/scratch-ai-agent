@@ -432,6 +432,36 @@ class FakeSession:
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
+    def test_explicit_follow_action_follows_requested_author(self) -> None:
+        events: list[str] = []
+
+        class FollowableUser(FakeUser):
+            username = "Other"
+
+            def follow(self) -> None:
+                events.append("follow")
+
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        target = FollowableUser([], {})
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = FakeSession(users={"Other": target})
+        client._sources = {}
+
+        client.follow_user("Other")
+
+        self.assertEqual(events, ["follow"])
+
     def test_invited_owned_project_receives_top_level_comment(self) -> None:
         settings = Settings(
             scratch_username="Bot",

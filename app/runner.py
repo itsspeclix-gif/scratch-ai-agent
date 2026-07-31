@@ -8,6 +8,7 @@ from app.models import AgentDecision, CommentRef, RunStats
 from app.policy import (
     check_incoming,
     check_reply,
+    is_explicit_follow_request,
     is_explicit_profile_invitation,
     is_explicit_project_invitation,
     scratch_project_id,
@@ -29,6 +30,8 @@ class ScratchClientProtocol(Protocol):
         project_id: str,
         text: str,
     ) -> str | None: ...
+
+    def follow_user(self, username: str) -> None: ...
 
     def finish_notification_batch(self, success: bool) -> None: ...
 
@@ -104,6 +107,7 @@ def run_once(
             explicit_project_invitation = is_explicit_project_invitation(
                 comment.content
             )
+            explicit_follow_request = is_explicit_follow_request(comment.content)
             project_id = (
                 scratch_project_id(comment.content)
                 if explicit_project_invitation
@@ -114,6 +118,8 @@ def run_once(
                 if explicit_project_invitation
                 else "Sure, I'll leave a comment on your profile."
                 if explicit_profile_invitation
+                else "Sure, I'll follow you."
+                if explicit_follow_request
                 else decision.reply
             )
             output = check_reply(reply_text, settings.max_reply_chars)
@@ -223,6 +229,13 @@ def run_once(
                         project_id,
                         project_comment,
                     )
+                if explicit_follow_request:
+                    stats.follows_simulated += 1
+                    logger.info(
+                        "simulate follow request source_comment=%s author=%s",
+                        comment.id,
+                        comment.author,
+                    )
                 logger.info(
                     "simulate comment=%s author=%s proposed_reply=%r agent_reason=%s",
                     comment.id,
@@ -281,6 +294,19 @@ def run_once(
                     reply_text = (
                         "I already have a conversation open on that project."
                     )
+
+            if explicit_follow_request:
+                scratch.follow_user(comment.author)
+                stats.follows_posted += 1
+                if profile_comment or project_comment:
+                    reply_text = reply_text.rstrip(".") + " and followed you."
+                else:
+                    reply_text = "Done, I followed you."
+                logger.info(
+                    "followed requested user source_comment=%s author=%s",
+                    comment.id,
+                    comment.author,
+                )
 
             scratch.reply(comment, reply_text)
             stats.posted += 1

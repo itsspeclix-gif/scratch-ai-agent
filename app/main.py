@@ -29,6 +29,7 @@ def main() -> int:
         "summary mode=%s scanned=%d simulated=%d posted=%d "
         "profile_invites_simulated=%d profile_invites_posted=%d "
         "project_invites_simulated=%d project_invites_posted=%d "
+        "follows_simulated=%d follows_posted=%d "
         "outreach_simulated=%d outreach_posted=%d existing=%d "
         "not_allowlisted=%d policy=%d agent_skips=%d errors=%d",
         settings.bot_mode,
@@ -39,6 +40,8 @@ def main() -> int:
         stats.profile_invites_posted,
         stats.project_invites_simulated,
         stats.project_invites_posted,
+        stats.follows_simulated,
+        stats.follows_posted,
         stats.outreach_simulated,
         stats.outreach_posted,
         stats.skipped_existing_reply,

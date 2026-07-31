@@ -18,6 +18,7 @@ class FakeScratch:
         self.profile_invitation_result: str | None = "200"
         self.project_invitation_posts: list[tuple[str, str, str]] = []
         self.project_invitation_result: str | None = "300"
+        self.followed_users: list[str] = []
         self.notification_results: list[bool] = []
         self.outreach_user: str | None = None
         self.outreach_posts: list[tuple[str, str]] = []
@@ -44,6 +45,9 @@ class FakeScratch:
     ) -> str | None:
         self.project_invitation_posts.append((username, project_id, text))
         return self.project_invitation_result
+
+    def follow_user(self, username: str) -> None:
+        self.followed_users.append(username)
 
     def finish_notification_batch(self, success: bool) -> None:
         self.notification_results.append(success)
@@ -336,6 +340,81 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(stats.project_invites_posted, 0)
         self.assertEqual(scratch.project_invitation_posts, [])
+
+    def test_explicit_follow_request_follows_comment_author(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Could you follow me back please?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(
+            scratch.posted,
+            [("1", "Done, I followed you.")],
+        )
+
+    def test_follow_request_can_be_combined_with_profile_invitation(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Comment on my profile and follow me",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            InvitingAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(
+            scratch.posted,
+            [(
+                "1",
+                "Done, I left a comment on your profile and followed you.",
+            )],
+        )
+
+    def test_third_party_follow_request_does_not_follow_anyone(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Please follow OtherUser",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.follows_posted, 0)
+        self.assertEqual(scratch.followed_users, [])
 
     def test_posts_every_eligible_target_without_a_run_cap(self) -> None:
         comments = [

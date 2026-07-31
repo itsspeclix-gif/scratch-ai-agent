@@ -54,6 +54,8 @@ class RunStats:
     profile_invites_posted: int = 0
     project_invites_simulated: int = 0
     project_invites_posted: int = 0
+    follows_simulated: int = 0
+    follows_posted: int = 0
     outreach_simulated: int = 0
     outreach_posted: int = 0
     errors: int = 0

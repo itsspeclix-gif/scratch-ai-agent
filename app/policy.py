@@ -82,6 +82,25 @@ NEGATED_PROJECT_INVITE_RE = re.compile(
     r"\b(?:comment|post|leave|visit|check out|look at|review)\b",
     re.IGNORECASE,
 )
+FOLLOW_REQUEST_RE = re.compile(
+    r"""
+    (?:^|[.!?]\s*|\band\s+)
+    (?:(?:hey|hi|yo)[,!]?\s+)?
+    (?:(?:please|pls)\s+)?
+    (?:(?:can|could|would|will)\s+(?:you|u)\s+)?
+    (?:(?:please|pls)\s+)?
+    (?:
+        follow\s+(?:me(?:\s+back)?|my\s+(?:account|profile)|back)
+        | give\s+me\s+(?:a\s+)?follow
+    )
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+NEGATED_FOLLOW_REQUEST_RE = re.compile(
+    r"\b(?:do not|don't|dont|never|stop|not)\b.{0,40}\bfollow\b",
+    re.IGNORECASE,
+)
 
 
 def is_explicit_profile_invitation(text: str) -> bool:
@@ -101,6 +120,13 @@ def is_explicit_project_invitation(text: str) -> bool:
         scratch_project_id(text)
         and PROJECT_INVITE_REQUEST_RE.search(text)
         and not NEGATED_PROJECT_INVITE_RE.search(text)
+    )
+
+
+def is_explicit_follow_request(text: str) -> bool:
+    return bool(
+        FOLLOW_REQUEST_RE.search(text)
+        and not NEGATED_FOLLOW_REQUEST_RE.search(text)
     )
 
 

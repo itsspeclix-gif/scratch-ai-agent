@@ -771,6 +771,13 @@ class ScratchClient:
         )
         return created_comment_id
 
+    def follow_user(self, username: str) -> None:
+        if username.casefold() == self._settings.scratch_username.casefold():
+            return
+        source = self._connect_source("profile", username)
+        source.follow()
+        logger.info("follow request completed user=%s", username)
+
     def outreach_candidate(self) -> str | None:
         users = [
             username

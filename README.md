@@ -96,8 +96,16 @@ Any eligible commenter can explicitly invite the bot to leave a comment on
 their own profile or page. The model proposes a separate profile comment, and
 the runner acts only when the newest message contains an explicit self-profile
 invitation. The requesting comment's author is always the destination; requests
-to target another username are ignored. The bot never follows the user and
-does not create another top-level thread if it already started one there.
+to target another username are ignored. It does not create another top-level
+thread if it already started one there.
+
+## Follow requests
+
+An eligible commenter can explicitly ask the bot to follow their own account
+with wording such as `follow me`, `follow me back`, or `follow my account`.
+The requesting comment's author is always the follow destination. A request to
+follow another named account is ignored, and outreach or profile invitations do
+not imply a follow unless the same message explicitly asks for one.
 
 ## Personality
 
@@ -180,6 +188,7 @@ Version 2.0 supports:
 - explicit author-only profile invitations
 - explicit owner-only invitations to linked Scratch projects
 - notification-driven replies in external project threads the bot has joined
+- explicit author-only follow requests
 - bounded context from the first public link in a comment
 - any audience or an allowlist
 - top-level comments and follow-up replies

@@ -6,6 +6,7 @@ from app.models import CommentRef
 from app.policy import (
     check_incoming,
     check_reply,
+    is_explicit_follow_request,
     is_explicit_profile_invitation,
     is_explicit_project_invitation,
     scratch_project_id,
@@ -106,6 +107,35 @@ class PolicyTests(unittest.TestCase):
             ),
             "123456",
         )
+
+    def test_explicit_self_follow_request_is_detected(self) -> None:
+        variations = (
+            "follow me",
+            "Could you follow me back please?",
+            "pls follow my account",
+            "give me a follow",
+            "Comment on my profile and follow me",
+        )
+        for text in variations:
+            with self.subTest(text=text):
+                self.assertTrue(is_explicit_follow_request(text))
+
+    def test_third_party_follow_request_is_not_detected(self) -> None:
+        self.assertFalse(is_explicit_follow_request("Please follow OtherUser"))
+
+    def test_follow_discussion_is_not_detected_as_request(self) -> None:
+        variations = (
+            "I follow you already",
+            "How do I follow somebody?",
+            "My followers like this project",
+            "Why did you follow me?",
+        )
+        for text in variations:
+            with self.subTest(text=text):
+                self.assertFalse(is_explicit_follow_request(text))
+
+    def test_negated_follow_request_is_not_detected(self) -> None:
+        self.assertFalse(is_explicit_follow_request("Please don't follow me"))
 
 
 if __name__ == "__main__":
