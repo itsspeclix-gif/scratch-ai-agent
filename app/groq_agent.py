@@ -173,11 +173,27 @@ class ChatAgent:
             return "Use the identity and personality configured on the Mistral Agent."
         return "Account identity and personality:\n" + self._settings.persona
 
+    def _knowledge_context(self) -> str:
+        if not (
+            self._settings.ai_provider == "mistral"
+            and self._settings.mistral_agent_id
+        ):
+            return ""
+        return """Knowledge grounding:
+- Before answering factual questions about Scratch users, accounts, usernames,
+  nicknames, Brand Battle, BB, Mini Battle, MB, competition history, hosts,
+  winners, or judges, search the attached document library.
+- Prefer retrieved library facts over memory or assumptions.
+- If the library has no relevant answer, say you are unsure instead of guessing.
+- Do not search the library for ordinary casual conversation."""
+
     def generate(self, comment: CommentRef) -> AgentDecision:
         system_prompt = f"""
 You operate an experimental AI-controlled Scratch creator account under close human supervision.
 
 {self._persona_context()}
+
+{self._knowledge_context()}
 
 Conversation behavior:
 - Use the supplied thread history to understand follow-up questions and references.
