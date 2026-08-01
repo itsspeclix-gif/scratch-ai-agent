@@ -117,6 +117,7 @@ class GroqAgentTests(unittest.TestCase):
         self.assertIn("Do not begin the reply with @username", system_prompt)
         self.assertIn("profile_comment", system_prompt)
         self.assertIn("project_comment", system_prompt)
+        self.assertIn("A test persona.", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn("How did you make it?", transcript)
@@ -342,6 +343,8 @@ class GroqAgentTests(unittest.TestCase):
         self.assertNotIn("completion_args", http.payload)
         self.assertIn("Who hosted BB7?", http.payload["inputs"])
         self.assertIn("Non-negotiable rules", http.payload["inputs"])
+        self.assertIn("configured on the Mistral Agent", http.payload["inputs"])
+        self.assertNotIn("A test persona.", http.payload["inputs"])
         self.assertEqual(decision.reply, "BB7 was hosted by ManageLimit.")
 
 

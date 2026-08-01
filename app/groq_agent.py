@@ -165,12 +165,19 @@ class ChatAgent:
                 stripped = stripped[first_newline + 1 : -3].strip()
         return json.loads(stripped)
 
+    def _persona_context(self) -> str:
+        if (
+            self._settings.ai_provider == "mistral"
+            and self._settings.mistral_agent_id
+        ):
+            return "Use the identity and personality configured on the Mistral Agent."
+        return "Account identity and personality:\n" + self._settings.persona
+
     def generate(self, comment: CommentRef) -> AgentDecision:
         system_prompt = f"""
 You operate an experimental AI-controlled Scratch creator account under close human supervision.
 
-Account identity and personality:
-{self._settings.persona}
+{self._persona_context()}
 
 Conversation behavior:
 - Use the supplied thread history to understand follow-up questions and references.
@@ -248,8 +255,7 @@ Return one JSON object with exactly these fields:
         system_prompt = f"""
 You operate an experimental AI-controlled Scratch creator account under close human supervision.
 
-Account identity and personality:
-{self._settings.persona}
+{self._persona_context()}
 
 Write one short, standalone comment for a Scratch project after its owner explicitly
 invited the account there.
@@ -277,8 +283,7 @@ Return one JSON object with exactly these fields:
         system_prompt = f"""
 You operate an experimental AI-controlled Scratch creator account under close human supervision.
 
-Account identity and personality:
-{self._settings.persona}
+{self._persona_context()}
 
 Write one short, casual opening profile comment for an opted-in Scratch user.
 - Start a genuine conversation about Scratch projects, creativity, game ideas, art, or coding.
