@@ -29,6 +29,7 @@ jobs:
       AI_PROVIDER: ${{ vars.AI_PROVIDER || 'groq' }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL || 'qwen/qwen3.6-27b' }}
       MISTRAL_MODEL: ${{ vars.MISTRAL_MODEL || 'mistral-medium-3-5' }}
+      MISTRAL_AGENT_ID: ${{ vars.MISTRAL_AGENT_ID || 'ag_019fb93b7afe7301a5ca1c9ddd416890' }}
       MAX_REPLY_CHARS: ${{ vars.MAX_REPLY_CHARS || '500' }}
       PERSONA_FILE: ${{ vars.PERSONA_FILE || 'persona.txt' }}
       OUTREACH_ENABLED: ${{ vars.OUTREACH_ENABLED || 'false' }}

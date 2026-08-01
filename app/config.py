@@ -77,6 +77,7 @@ class Settings:
     ai_provider: AIProvider = "groq"
     mistral_api_key: str = ""
     mistral_model: str = "mistral-medium-3-5"
+    mistral_agent_id: str = ""
     outreach_enabled: bool = False
     outreach_users: tuple[str, ...] = ()
     outreach_interval_minutes: int = 480
@@ -152,6 +153,7 @@ class Settings:
                 "MISTRAL_MODEL",
                 "mistral-medium-3-5",
             ).strip(),
+            mistral_agent_id=os.getenv("MISTRAL_AGENT_ID", "").strip(),
             outreach_enabled=_boolean("OUTREACH_ENABLED", False),
             outreach_users=outreach_users,
             outreach_interval_minutes=_positive_int(

@@ -127,7 +127,11 @@ These may be added under `Settings → Secrets and variables → Actions → Var
 - `MAX_REPLY_CHARS=500`: maximum generated reply length, kept within Scratch's comment field.
 - `AI_PROVIDER=groq`: use `groq` or `mistral`.
 - `GROQ_MODEL=qwen/qwen3.6-27b`: Groq model.
-- `MISTRAL_MODEL=mistral-medium-3-5`: pinned direct Mistral model.
+- `MISTRAL_AGENT_ID=`: use a configured Mistral Agent through the stateless
+  Conversations API. The Agent supplies its own model, reasoning settings,
+  personality, and attached document libraries.
+- `MISTRAL_MODEL=mistral-medium-3-5`: direct Mistral fallback used only when
+  `MISTRAL_AGENT_ID` is empty.
 - `OUTREACH_USERS_FILE=config/outreach_users.txt`: opt-in outreach list.
 - `OUTREACH_ENABLED=false`: explicit proactive outreach kill switch.
 - `OUTREACH_INTERVAL_MINUTES=480`: at most three outreach attempts per day.

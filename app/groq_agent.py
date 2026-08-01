@@ -11,6 +11,7 @@ from app.models import AgentDecision, CommentRef
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
+MISTRAL_CONVERSATIONS_URL = "https://api.mistral.ai/v1/conversations"
 
 
 class ChatAgent:
@@ -31,7 +32,25 @@ class ChatAgent:
         *,
         conversation_actions: bool = False,
     ) -> AgentDecision:
-        if self._settings.ai_provider == "mistral":
+        uses_mistral_agent = (
+            self._settings.ai_provider == "mistral"
+            and bool(self._settings.mistral_agent_id)
+        )
+        if uses_mistral_agent:
+            url = MISTRAL_CONVERSATIONS_URL
+            api_key = self._settings.mistral_api_key
+            payload: dict[str, Any] = {
+                "agent_id": self._settings.mistral_agent_id,
+                "inputs": (
+                    "Runtime instructions for this Scratch turn:\n\n"
+                    + system_prompt
+                    + "\n\nTurn data:\n\n"
+                    + user_content
+                ),
+                "store": False,
+                "stream": False,
+            }
+        elif self._settings.ai_provider == "mistral":
             url = MISTRAL_CHAT_URL
             api_key = self._settings.mistral_api_key
             model = self._settings.mistral_model
@@ -40,26 +59,27 @@ class ChatAgent:
             api_key = self._settings.groq_api_key
             model = self._settings.groq_model
 
-        payload: dict[str, Any] = {
-            "model": model,
-            "temperature": 0.45,
-            "max_tokens": 180,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-        }
-        if (
-            self._settings.ai_provider == "groq"
-            and self._settings.groq_model == "qwen/qwen3.6-27b"
-        ):
-            payload["reasoning_effort"] = "none"
-        if (
-            self._settings.ai_provider == "mistral"
-            and self._settings.mistral_model == "mistral-medium-3-5"
-        ):
-            payload["reasoning_effort"] = "none"
+        if not uses_mistral_agent:
+            payload = {
+                "model": model,
+                "temperature": 0.45,
+                "max_tokens": 180,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            }
+            if (
+                self._settings.ai_provider == "groq"
+                and self._settings.groq_model == "qwen/qwen3.6-27b"
+            ):
+                payload["reasoning_effort"] = "none"
+            if (
+                self._settings.ai_provider == "mistral"
+                and self._settings.mistral_model == "mistral-medium-3-5"
+            ):
+                payload["reasoning_effort"] = "none"
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -75,8 +95,11 @@ class ChatAgent:
         body = response.json()
 
         try:
-            content = body["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            if uses_mistral_agent:
+                content = self._mistral_conversation_content(body)
+            else:
+                content = body["choices"][0]["message"]["content"]
+            parsed = self._decode_json_response(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError("AI provider returned an invalid response structure") from exc
 
@@ -107,6 +130,40 @@ class ChatAgent:
             profile_comment=profile_comment.strip(),
             project_comment=project_comment.strip(),
         )
+
+    @staticmethod
+    def _mistral_conversation_content(body: dict[str, Any]) -> str:
+        outputs = body.get("outputs")
+        if not isinstance(outputs, list):
+            raise TypeError("Mistral conversation outputs must be a list")
+
+        for output in reversed(outputs):
+            if not isinstance(output, dict) or output.get("type") != "message.output":
+                continue
+            content = output.get("content")
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                text_chunks = [
+                    chunk["text"]
+                    for chunk in content
+                    if isinstance(chunk, dict)
+                    and chunk.get("type") == "text"
+                    and isinstance(chunk.get("text"), str)
+                ]
+                if text_chunks:
+                    return "".join(text_chunks)
+
+        raise TypeError("Mistral conversation did not return a message output")
+
+    @staticmethod
+    def _decode_json_response(content: str) -> Any:
+        stripped = content.strip()
+        if stripped.startswith("```") and stripped.endswith("```"):
+            first_newline = stripped.find("\n")
+            if first_newline != -1:
+                stripped = stripped[first_newline + 1 : -3].strip()
+        return json.loads(stripped)
 
     def generate(self, comment: CommentRef) -> AgentDecision:
         system_prompt = f"""

@@ -7,6 +7,7 @@ from app.config import Settings
 from app.groq_agent import (
     GROQ_CHAT_URL,
     MISTRAL_CHAT_URL,
+    MISTRAL_CONVERSATIONS_URL,
     ChatAgent,
     GroqAgent,
 )
@@ -15,16 +16,23 @@ from app.models import CommentRef, ThreadTurn
 
 
 class FakeResponse:
-    def __init__(self, content: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        content: dict[str, str] | None = None,
+        body: dict | None = None,
+    ) -> None:
         self.content = content or {
             "reply": "The second level uses the same clone system.",
             "reason": "follow-up project question",
         }
+        self.body = body
 
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict:
+        if self.body is not None:
+            return self.body
         return {
             "choices": [
                 {
@@ -37,19 +45,24 @@ class FakeResponse:
 
 
 class FakeHTTPSession:
-    def __init__(self, content: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        content: dict[str, str] | None = None,
+        body: dict | None = None,
+    ) -> None:
         self.url = ""
         self.headers: dict[str, str] = {}
         self.payload: dict = {}
         self.timeout = 0
         self.content = content
+        self.body = body
 
     def post(self, url: str, *, headers: dict, json: dict, timeout: int) -> FakeResponse:
         self.url = url
         self.headers = headers
         self.payload = json
         self.timeout = timeout
-        return FakeResponse(self.content)
+        return FakeResponse(self.content, self.body)
 
 
 class FakeLinkInspector:
@@ -268,6 +281,68 @@ class GroqAgentTests(unittest.TestCase):
             "mistral-medium-3-5",
         )
         self.assertEqual(http.payload["reasoning_effort"], "none")
+
+    def test_mistral_agent_uses_stateless_conversations_endpoint(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="groq-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+            ai_provider="mistral",
+            mistral_api_key="mistral-key",
+            mistral_agent_id="ag_test",
+        )
+        reply = {
+            "reply": "BB7 was hosted by ManageLimit.",
+            "reason": "library-grounded answer",
+            "profile_comment": "",
+            "project_comment": "",
+        }
+        http = FakeHTTPSession(
+            body={
+                "outputs": [
+                    {"type": "tool.execution", "name": "document_library"},
+                    {
+                        "type": "message.output",
+                        "content": [
+                            {
+                                "type": "tool_reference",
+                                "tool": "document_library",
+                            },
+                            {
+                                "type": "thinking",
+                                "thinking": [{"type": "text", "text": "Reasoning"}],
+                            },
+                            {
+                                "type": "text",
+                                "text": "```json\n" + json.dumps(reply) + "\n```",
+                            },
+                        ],
+                    },
+                ]
+            }
+        )
+
+        decision = ChatAgent(settings, http=http).generate(
+            CommentRef("1", "Tester", "Who hosted BB7?", None, object())
+        )
+
+        self.assertEqual(http.url, MISTRAL_CONVERSATIONS_URL)
+        self.assertEqual(http.payload["agent_id"], "ag_test")
+        self.assertFalse(http.payload["store"])
+        self.assertFalse(http.payload["stream"])
+        self.assertNotIn("model", http.payload)
+        self.assertNotIn("tools", http.payload)
+        self.assertNotIn("instructions", http.payload)
+        self.assertNotIn("completion_args", http.payload)
+        self.assertIn("Who hosted BB7?", http.payload["inputs"])
+        self.assertIn("Non-negotiable rules", http.payload["inputs"])
+        self.assertEqual(decision.reply, "BB7 was hosted by ManageLimit.")
 
 
 if __name__ == "__main__":
