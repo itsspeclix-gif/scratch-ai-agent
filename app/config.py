@@ -80,6 +80,7 @@ class Settings:
     outreach_enabled: bool = False
     outreach_users: tuple[str, ...] = ()
     outreach_interval_minutes: int = 480
+    full_scan_enabled: bool = False
     full_scan_interval_minutes: int = 360
 
     @classmethod
@@ -157,6 +158,7 @@ class Settings:
                 "OUTREACH_INTERVAL_MINUTES",
                 480,
             ),
+            full_scan_enabled=_boolean("FULL_SCAN_ENABLED", False),
             full_scan_interval_minutes=_positive_int(
                 "FULL_SCAN_INTERVAL_MINUTES",
                 360,

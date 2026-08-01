@@ -432,6 +432,24 @@ class FakeSession:
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
+    def test_full_scan_is_disabled_by_default(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+            full_scan_interval_minutes=1,
+        )
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+
+        self.assertFalse(client._full_scan_due())
+
     def test_explicit_follow_action_follows_requested_author(self) -> None:
         events: list[str] = []
 
@@ -606,6 +624,7 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             bot_mode="private",
             max_reply_chars=500,
             persona="Test",
+            full_scan_enabled=True,
             full_scan_interval_minutes=1,
         )
         profile_root = FakeComment(

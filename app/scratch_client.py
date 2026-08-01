@@ -456,6 +456,8 @@ class ScratchClient:
         return result
 
     def _full_scan_due(self) -> bool:
+        if not self._settings.full_scan_enabled:
+            return False
         minute = int(time.time() // 60)
         return minute % self._settings.full_scan_interval_minutes == 0
 

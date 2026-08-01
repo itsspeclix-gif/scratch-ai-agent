@@ -66,10 +66,10 @@ summary. Link fetching blocks private network addresses, revalidates redirects,
 accepts text formats only, and stops after 32 KiB. Page text is treated as
 untrusted conversation context and cannot change the bot's rules.
 
-Every `FULL_SCAN_INTERVAL_MINUTES` (six hours by default), the agent performs a
-recovery scan of its own profile, all owned projects, and bot-started threads on
-listed outreach profiles. This catches conversations missed during API failures
-or deployment downtime.
+Periodic recovery scanning is disabled by default because it can revisit a flat
+Scratch thread even when its newest reply was addressed to somebody else. Set
+`FULL_SCAN_ENABLED=true` only when deliberately recovering missed notifications;
+`FULL_SCAN_INTERVAL_MINUTES` then controls its interval.
 
 ## Opt-in outreach
 
@@ -131,7 +131,8 @@ These may be added under `Settings → Secrets and variables → Actions → Var
 - `OUTREACH_USERS_FILE=config/outreach_users.txt`: opt-in outreach list.
 - `OUTREACH_ENABLED=false`: explicit proactive outreach kill switch.
 - `OUTREACH_INTERVAL_MINUTES=480`: at most three outreach attempts per day.
-- `FULL_SCAN_INTERVAL_MINUTES=360`: periodic recovery scan interval.
+- `FULL_SCAN_ENABLED=false`: keep periodic recovery scanning off.
+- `FULL_SCAN_INTERVAL_MINUTES=360`: recovery interval when explicitly enabled.
 
 There is no configured cap on projects, top-level threads, reply pages, thread
 history, or replies found in a notification batch. Proactive outreach is
@@ -195,7 +196,7 @@ Version 2.0 supports:
 - complete thread context
 - all eligible replies found in each run
 - GitHub execution requested every minute through Cloudflare
-- six-hour periodic reconciliation scans
+- optional periodic reconciliation scans, disabled by default
 - editable account personality
 
 It does not join studios, create projects, enter an external project without its

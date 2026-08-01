@@ -34,6 +34,7 @@ jobs:
       OUTREACH_ENABLED: ${{ vars.OUTREACH_ENABLED || 'false' }}
       OUTREACH_USERS_FILE: ${{ vars.OUTREACH_USERS_FILE || 'config/outreach_users.txt' }}
       OUTREACH_INTERVAL_MINUTES: ${{ vars.OUTREACH_INTERVAL_MINUTES || '480' }}
+      FULL_SCAN_ENABLED: ${{ vars.FULL_SCAN_ENABLED || 'false' }}
       FULL_SCAN_INTERVAL_MINUTES: ${{ vars.FULL_SCAN_INTERVAL_MINUTES || '360' }}
 
     steps:
