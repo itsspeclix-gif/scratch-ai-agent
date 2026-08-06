@@ -705,7 +705,10 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             return CommentRef(comment_id, "Tester", "Hi", None, object())
 
         with (
-            patch("app.scratch_client.requests.get", return_value=CountResponse()),
+            patch(
+                "app.scratch_client.requests.get",
+                return_value=CountResponse(),
+            ) as get,
             patch.object(client, "_full_scan_due", return_value=False),
             patch.object(client, "_notification_target", side_effect=target),
         ):
@@ -713,6 +716,14 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(session.message_limits, [2])
         self.assertEqual({target.id for target in targets}, {"1", "2"})
+        request = get.call_args
+        self.assertEqual(
+            request.args[0],
+            "https://api.scratch.mit.edu/users/Bot/messages/count",
+        )
+        self.assertIsInstance(request.kwargs["params"]["cachebust"], int)
+        self.assertEqual(request.kwargs["headers"]["Cache-Control"], "no-cache")
+        self.assertEqual(request.kwargs["headers"]["Pragma"], "no-cache")
 
     def test_notification_count_failure_still_fetches_messages(self) -> None:
         settings = Settings(

@@ -666,14 +666,18 @@ class ScratchClient:
 
     def _message_count(self) -> int:
         username = self._settings.scratch_username
-        headers = _session_headers(self._session)
+        session_headers = _session_headers(self._session)
         cookies = _session_cookies(self._session)
         if not getattr(self._session, "_username", None) or (
-            not headers and not cookies
+            not session_headers and not cookies
         ):
             return int(self._session.message_count())
+        headers = dict(session_headers)
+        headers["Cache-Control"] = "no-cache"
+        headers["Pragma"] = "no-cache"
         response = requests.get(
             f"https://api.scratch.mit.edu/users/{username}/messages/count",
+            params={"cachebust": time.time_ns()},
             headers=headers,
             cookies=cookies,
             timeout=10,
