@@ -56,6 +56,31 @@ def _profile_post_response_markers(text: str) -> str:
     return ",".join(name for name, present in markers.items() if present) or "none"
 
 
+def _json_profile_comment_id(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    for key in ("id", "comment_id", "commentId"):
+        value = body.get(key)
+        if value not in (None, "", 0, "0"):
+            return str(value)
+    nested = body.get("comment")
+    if isinstance(nested, dict):
+        return _json_profile_comment_id(nested)
+    return None
+
+
+def _json_profile_error(body: Any) -> str:
+    if not isinstance(body, dict):
+        return ""
+    for key in ("message", "error", "code"):
+        value = body.get(key)
+        if value not in (None, ""):
+            return str(value)
+    if "mute_status" in body:
+        return "mute_status"
+    return ""
+
+
 class _ProfileComment:
     def __init__(
         self,
@@ -734,12 +759,26 @@ class ScratchClient:
                 f"(HTTP {response.status_code})"
             )
 
+        error_message = ""
+        json_body: Any | None = None
+        try:
+            json_body = response.json()
+        except (AttributeError, ValueError):
+            try:
+                json_body = json.loads(response.text)
+            except json.JSONDecodeError:
+                json_body = None
+        if json_body is not None:
+            json_comment_id = _json_profile_comment_id(json_body)
+            if json_comment_id is not None:
+                return json_comment_id
+            error_message = _json_profile_error(json_body)
+
         parser = _ProfilePostParser()
         parser.feed(response.text)
         if parser.created_comment_id is not None:
             return parser.created_comment_id
 
-        error_message = ""
         if parser.error_data.strip():
             try:
                 error_body = json.loads(parser.error_data)
@@ -753,18 +792,12 @@ class ScratchClient:
                         or error_body
                     )
         if not error_message:
-            verified_comment_id = None
-            for attempt in range(3):
-                if attempt:
-                    time.sleep(1)
-                verified_comment_id = self._verified_profile_post_id(
-                    profile_username,
-                    text,
-                    parent_id=parent_id,
-                    recipient_username=recipient_username,
-                )
-                if verified_comment_id is not None:
-                    break
+            verified_comment_id = self._verified_profile_post_id(
+                profile_username,
+                text,
+                parent_id=parent_id,
+                recipient_username=recipient_username,
+            )
             if verified_comment_id is not None:
                 logger.info(
                     "profile comment accepted but response omitted id; "
@@ -778,7 +811,8 @@ class ScratchClient:
                 f"(HTTP {response.status_code}, "
                 f"content-type={response.headers.get('content-type', 'unknown')}, "
                 f"body_length={len(response.text)}, "
-                f"markers={_profile_post_response_markers(response.text)})"
+                f"markers={_profile_post_response_markers(response.text)}, "
+                f"json_type={type(json_body).__name__})"
             )
         raise RuntimeError(f"Profile comment was not accepted: {error_message[:200]}")
 
