@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 from app.config import Settings
 from app.models import CommentRef
-from app.scratch_client import ScratchClient
+from app.scratch_client import (
+    ScratchClient,
+    _json_profile_comment_id,
+    _json_profile_error,
+)
 
 
 class FakeComment:
@@ -418,6 +422,54 @@ class ScratchClientThreadTests(unittest.TestCase):
             return_value=JsonSuccessResponse(),
         ):
             self.client.reply(comment, "Profile response")
+
+    def test_profile_reply_accepts_json_list_success_response(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+            id = 10
+            parent_id = None
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class JsonListSuccessResponse:
+            status_code = 200
+            text = '[{"id":415116900,"parent_id":10,"content":"ok"}]'
+            headers = {"content-type": "application/json"}
+
+            def json(self) -> list[dict[str, object]]:
+                return [{"id": 415116900, "parent_id": 10, "content": "ok"}]
+
+        self.client._session = FakeSession()
+        self.client._sources = {}
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=JsonListSuccessResponse(),
+        ):
+            self.client.reply(comment, "Profile response")
+
+    def test_profile_json_helpers_search_nested_lists_and_errors(self) -> None:
+        self.assertEqual(
+            _json_profile_comment_id([{"result": {"comment": {"id": 55}}}]),
+            "55",
+        )
+        self.assertEqual(
+            _json_profile_error([{"result": {"error": "isFlood"}}]),
+            "isFlood",
+        )
 
     def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
         class RawProfileComment:

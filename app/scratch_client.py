@@ -57,27 +57,44 @@ def _profile_post_response_markers(text: str) -> str:
 
 
 def _json_profile_comment_id(body: Any) -> str | None:
-    if not isinstance(body, dict):
-        return None
-    for key in ("id", "comment_id", "commentId"):
-        value = body.get(key)
-        if value not in (None, "", 0, "0"):
-            return str(value)
-    nested = body.get("comment")
-    if isinstance(nested, dict):
-        return _json_profile_comment_id(nested)
+    if isinstance(body, dict):
+        for key in ("id", "comment_id", "commentId"):
+            value = body.get(key)
+            if value not in (None, "", 0, "0"):
+                return str(value)
+        for value in body.values():
+            found = _json_profile_comment_id(value)
+            if found is not None:
+                return found
+    elif isinstance(body, list):
+        for item in body:
+            found = _json_profile_comment_id(item)
+            if found is not None:
+                return found
     return None
 
 
 def _json_profile_error(body: Any) -> str:
-    if not isinstance(body, dict):
-        return ""
-    for key in ("message", "error", "code"):
-        value = body.get(key)
-        if value not in (None, ""):
-            return str(value)
-    if "mute_status" in body:
-        return "mute_status"
+    if isinstance(body, dict):
+        if "mute_status" in body:
+            return "mute_status"
+        for key in ("message", "error", "code"):
+            value = body.get(key)
+            if isinstance(value, (dict, list)):
+                nested = _json_profile_error(value)
+                if nested:
+                    return nested
+            elif value not in (None, ""):
+                return str(value)
+        for value in body.values():
+            nested = _json_profile_error(value)
+            if nested:
+                return nested
+    elif isinstance(body, list):
+        for item in body:
+            nested = _json_profile_error(item)
+            if nested:
+                return nested
     return ""
 
 
