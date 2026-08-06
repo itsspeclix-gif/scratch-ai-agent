@@ -75,10 +75,19 @@ def _json_profile_comment_id(body: Any) -> str | None:
 
 
 def _json_profile_error(body: Any) -> str:
+    if isinstance(body, str):
+        normalized = re.sub(r"\s+", " ", body).strip().casefold()
+        if "same comment" in normalized and "spam" in normalized:
+            return "Scratch rejected the profile comment as duplicate spam"
+        if "commenting really quickly" in normalized:
+            return "Scratch rate-limited the profile comment"
+        if "comments have been turned off" in normalized:
+            return "Scratch comments are disabled on this profile"
+        return ""
     if isinstance(body, dict):
         if "mute_status" in body:
             return "mute_status"
-        for key in ("message", "error", "code"):
+        for key in ("message", "error", "errors", "code"):
             value = body.get(key)
             if isinstance(value, (dict, list)):
                 nested = _json_profile_error(value)

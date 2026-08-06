@@ -470,6 +470,19 @@ class ScratchClientThreadTests(unittest.TestCase):
             _json_profile_error([{"result": {"error": "isFlood"}}]),
             "isFlood",
         )
+        self.assertEqual(
+            _json_profile_error(
+                [
+                    "Hmm, seems like you've posted the same comment a bunch "
+                    "of times. Please don't spam."
+                ]
+            ),
+            "Scratch rejected the profile comment as duplicate spam",
+        )
+        self.assertEqual(
+            _json_profile_error([{"errors": ["comments have been turned off"]}]),
+            "Scratch comments are disabled on this profile",
+        )
 
     def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
         class RawProfileComment:
