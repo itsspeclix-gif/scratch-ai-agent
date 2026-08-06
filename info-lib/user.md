@@ -16,7 +16,7 @@ A coder and designer. Male.
 
 ### @kawlea
 
-Nickname: "Kaw." One of the main competitors expected to compete in the finals of BB8 (Brand Battle 8). Talented designer who reached the semifinals in BB7 (Brand Battle 7). Male.
+Kaw (Kawlea) is a French hobbyist graphic and font designer, known for his talent in design. He reached the semifinals of Brand Battle 7 (BB7) and is a strong contender in the finals of Brand Battle 8 (BB8). With a passion for birds and sushi, he goes by the nickname "Kaw" and can be found under the handle @Kawlea.
 
 ### @hanypho
 
