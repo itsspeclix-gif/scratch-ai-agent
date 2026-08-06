@@ -434,7 +434,7 @@ class FakeSession:
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
-    def test_notification_count_endpoint_does_not_block_message_fetch(self) -> None:
+    def test_notification_count_endpoint_sets_message_fetch_limit(self) -> None:
         settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
@@ -447,9 +447,9 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             persona="Test",
         )
         messages = [
-            SimpleNamespace(comment_id="1"),
-            SimpleNamespace(comment_id="2"),
-            SimpleNamespace(comment_id="3"),
+            SimpleNamespace(type="addcomment", comment_id="1"),
+            SimpleNamespace(type="addcomment", comment_id="2"),
+            SimpleNamespace(type="addcomment", comment_id="3"),
         ]
         session = FakeSession(messages)
         session._username = "Bot"  # type: ignore[attr-defined]
@@ -461,7 +461,7 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             ok = True
 
             def json(self) -> dict[str, int]:
-                return {"count": 0}
+                return {"count": 2}
 
         def target(message: object) -> CommentRef:
             comment_id = str(getattr(message, "comment_id"))
@@ -474,8 +474,8 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         ):
             targets = client.conversation_targets()
 
-        self.assertEqual(session.message_limits, [40])
-        self.assertEqual({target.id for target in targets}, {"1", "2", "3"})
+        self.assertEqual(session.message_limits, [2])
+        self.assertEqual({target.id for target in targets}, {"1", "2"})
 
     def test_notification_count_failure_still_fetches_messages(self) -> None:
         settings = Settings(
@@ -490,8 +490,8 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             persona="Test",
         )
         messages = [
-            SimpleNamespace(comment_id="1"),
-            SimpleNamespace(comment_id="2"),
+            SimpleNamespace(type="addcomment", comment_id="1"),
+            SimpleNamespace(type="addcomment", comment_id="2"),
         ]
         session = FakeSession(messages)
         session._username = "Bot"  # type: ignore[attr-defined]
