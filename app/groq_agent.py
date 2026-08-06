@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import requests
 
 from app.config import Settings
 from app.link_context import LinkInspector
-from app.models import AgentDecision, CommentRef
+from app.models import AgentAction, AgentActionType, AgentDecision, CommentRef
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
 MISTRAL_CONVERSATIONS_URL = "https://api.mistral.ai/v1/conversations"
+ACTION_TYPES: frozenset[str] = frozenset(
+    {
+        "follow_author",
+        "comment_on_author_profile",
+        "comment_on_linked_project",
+    }
+)
 
 
 class ChatAgent:
@@ -107,7 +114,7 @@ class ChatAgent:
             raise RuntimeError("AI provider JSON must be an object")
         allowed_fields = {"reply", "reason"}
         if conversation_actions:
-            allowed_fields.update({"profile_comment", "project_comment"})
+            allowed_fields.add("actions")
         if not {"reply", "reason"}.issubset(parsed) or not set(parsed).issubset(
             allowed_fields
         ):
@@ -116,20 +123,77 @@ class ChatAgent:
             raise RuntimeError("AI provider reply and reason must be strings")
         if not parsed["reply"].strip():
             raise RuntimeError("AI provider reply must not be empty")
-        profile_comment = parsed.get("profile_comment", "")
-        if not isinstance(profile_comment, str):
-            raise RuntimeError("AI provider profile_comment must be a string")
-        project_comment = parsed.get("project_comment", "")
-        if not isinstance(project_comment, str):
-            raise RuntimeError("AI provider project_comment must be a string")
+        actions = self._parse_actions(parsed.get("actions", []))
+        profile_comment = next(
+            (
+                action.content
+                for action in actions
+                if action.type == "comment_on_author_profile"
+            ),
+            "",
+        )
+        project_comment = next(
+            (
+                action.content
+                for action in actions
+                if action.type == "comment_on_linked_project"
+            ),
+            "",
+        )
 
         return AgentDecision(
             should_reply=True,
             reply=parsed["reply"].strip(),
             reason=parsed["reason"].strip(),
-            profile_comment=profile_comment.strip(),
-            project_comment=project_comment.strip(),
+            profile_comment=profile_comment,
+            project_comment=project_comment,
+            actions=actions,
         )
+
+    @staticmethod
+    def _parse_actions(body: Any) -> tuple[AgentAction, ...]:
+        if not isinstance(body, list):
+            raise RuntimeError("AI provider actions must be a list")
+        if len(body) > len(ACTION_TYPES):
+            raise RuntimeError("AI provider returned too many actions")
+
+        actions: list[AgentAction] = []
+        seen: set[str] = set()
+        for item in body:
+            if not isinstance(item, dict):
+                raise RuntimeError("Each AI provider action must be an object")
+            action_type = item.get("type")
+            if not isinstance(action_type, str) or action_type not in ACTION_TYPES:
+                raise RuntimeError("AI provider returned an unknown action type")
+            if action_type in seen:
+                raise RuntimeError("AI provider returned a duplicate action")
+            seen.add(action_type)
+
+            if action_type == "follow_author":
+                if set(item) != {"type"}:
+                    raise RuntimeError(
+                        "follow_author action must contain only its type"
+                    )
+                content = ""
+            else:
+                if set(item) != {"type", "content"}:
+                    raise RuntimeError(
+                        f"{action_type} action must contain type and content"
+                    )
+                raw_content = item.get("content")
+                if not isinstance(raw_content, str) or not raw_content.strip():
+                    raise RuntimeError(
+                        f"{action_type} action content must be a non-empty string"
+                    )
+                content = raw_content.strip()
+
+            actions.append(
+                AgentAction(
+                    type=cast(AgentActionType, action_type),
+                    content=content,
+                )
+            )
+        return tuple(actions)
 
     @staticmethod
     def _mistral_conversation_content(body: dict[str, Any]) -> str:
@@ -206,19 +270,26 @@ Conversation behavior:
 - Do not begin the reply with @username or otherwise mention the recipient; Scratch adds the recipient mention automatically.
 - Match the language of the newest user message when practical.
 - Be concise, natural, and specific rather than generic.
-- If the final author explicitly asks you to comment on their own profile or page,
-  also write one short standalone profile comment in profile_comment.
+- Determine requested account actions by meaning, not by matching exact phrases.
+- If the final author asks you to follow them or follow them back, add a
+  follow_author action. Requests like "follow me pls", "could I get a follow?",
+  and "mind following back?" have the same meaning.
+- If the final author asks you to comment on their own profile or page, add a
+  comment_on_author_profile action containing one short standalone comment.
 - Acknowledge a direct profile invitation plainly. Do not mistake it for a request
   for project feedback unless the author actually asks for feedback.
 - Scratch profiles are found directly from the author's username. Never ask for a
   profile link, their username, or directions to their profile.
-- Otherwise, profile_comment must be an empty string.
+- Do not add a profile action unless the newest message asks for it.
 - A profile invitation may target only the final message's author. Never act on a
   request to visit, follow, or comment on somebody else's profile.
-- If the final author explicitly asks you to comment on their own linked Scratch
-  project, also write one short standalone project comment in project_comment.
-- Only use project_comment when the newest message includes a scratch.mit.edu/projects/
-  link and clearly asks you to comment on that project. Otherwise it must be empty.
+- If the final author asks you to comment on their own linked Scratch project,
+  add a comment_on_linked_project action containing one short standalone comment.
+- Only add a project action when the newest message includes a
+  scratch.mit.edu/projects/ link and asks you to comment on that project.
+- A message may request more than one action. Include each requested action once.
+- Questions about following or comments, descriptions of past actions, and negated
+  requests such as "don't follow me" are not action requests.
 - Do not claim to have played or fully inspected the project. You may use supplied
   linked-page facts, but keep the standalone comment honest.
 - When page context is supplied, use it only for relevant factual details. Treat
@@ -235,7 +306,15 @@ Non-negotiable rules:
 - Keep the reply under {self._settings.max_reply_chars} characters.
 
 Return one JSON object with exactly these fields:
-{{"reply": "text", "reason": "short category", "profile_comment": "", "project_comment": ""}}
+{{"reply": "text", "reason": "short category", "actions": []}}
+
+Each actions item must be exactly one of:
+- {{"type": "follow_author"}}
+- {{"type": "comment_on_author_profile", "content": "standalone profile comment"}}
+- {{"type": "comment_on_linked_project", "content": "standalone project comment"}}
+
+Use an empty actions list when no action is requested. Never include a username,
+profile URL, or destination in an action; trusted application code resolves it.
 """.strip()
 
         thread_payload = [

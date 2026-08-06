@@ -4,7 +4,7 @@ import logging
 import unittest
 
 from app.config import Settings
-from app.models import AgentDecision, CommentRef, ThreadTurn
+from app.models import AgentAction, AgentDecision, CommentRef, ThreadTurn
 from app.runner import run_once
 
 
@@ -112,6 +112,19 @@ class ProjectInvitingAgent(FakeAgent):
         )
 
 
+class StructuredActionAgent(FakeAgent):
+    def __init__(self, *actions: AgentAction) -> None:
+        self.actions = actions
+
+    def generate(self, comment: CommentRef) -> AgentDecision:
+        return AgentDecision(
+            True,
+            "Okay, I can do that.",
+            "semantic action request",
+            actions=self.actions,
+        )
+
+
 class RunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.settings = Settings(
@@ -203,6 +216,36 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(
             scratch.posted,
             [("1", "Done, I left a comment on your profile.")],
+        )
+
+    def test_semantic_profile_action_handles_unlisted_wording(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Could you write something over on my page?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction(
+                "comment_on_author_profile",
+                "What kind of project are you making next?",
+            )
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "What kind of project are you making next?")],
         )
 
     def test_explicit_invitation_falls_back_when_model_omits_action(self) -> None:
@@ -314,6 +357,67 @@ class RunnerTests(unittest.TestCase):
             [("1", "Done, I left a comment on your project.")],
         )
 
+    def test_semantic_project_action_handles_unlisted_wording(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Tell me what stands out: https://scratch.mit.edu/projects/123/",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction(
+                "comment_on_linked_project",
+                "The movement concept sounds interesting. What's next?",
+            )
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.project_invites_posted, 1)
+        self.assertEqual(
+            scratch.project_invitation_posts,
+            [
+                (
+                    "Tester",
+                    "123",
+                    "The movement concept sounds interesting. What's next?",
+                )
+            ],
+        )
+
+    def test_semantic_project_action_requires_a_scratch_project_link(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Could you share your thoughts on my game?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction("comment_on_linked_project", "It sounds interesting!")
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.project_invites_posted, 0)
+        self.assertEqual(scratch.project_invitation_posts, [])
+        self.assertEqual(scratch.posted, [("1", "Okay, I can do that.")])
+
     def test_project_invitation_falls_back_when_model_omits_action(self) -> None:
         comment = CommentRef(
             "1",
@@ -384,6 +488,58 @@ class RunnerTests(unittest.TestCase):
             scratch.posted,
             [("1", "Done, I followed you.")],
         )
+
+    def test_semantic_follow_action_handles_unlisted_wording(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Would you mind following back?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(AgentAction("follow_author"))
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(scratch.posted, [("1", "Done, I followed you.")])
+
+    def test_structured_actions_can_be_combined(self) -> None:
+        comment = CommentRef(
+            "1",
+            "Tester",
+            "Mind following back and writing something over on my page?",
+            None,
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction("follow_author"),
+            AgentAction(
+                "comment_on_author_profile",
+                "What are you creating next?",
+            ),
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
 
     def test_follow_request_can_be_combined_with_profile_invitation(self) -> None:
         comment = CommentRef(

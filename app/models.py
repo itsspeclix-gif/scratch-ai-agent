@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+
+AgentActionType = Literal[
+    "follow_author",
+    "comment_on_author_profile",
+    "comment_on_linked_project",
+]
 
 
 @dataclass(frozen=True)
@@ -27,12 +34,23 @@ class CommentRef:
 
 
 @dataclass(frozen=True)
+class AgentAction:
+    """A model-requested action whose destination is resolved by trusted code."""
+
+    type: AgentActionType
+    content: str = ""
+
+
+@dataclass(frozen=True)
 class AgentDecision:
     should_reply: bool
     reply: str
     reason: str
+    # Retained for compatibility with older integrations. New model responses use
+    # the structured actions collection below.
     profile_comment: str = ""
     project_comment: str = ""
+    actions: tuple[AgentAction, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

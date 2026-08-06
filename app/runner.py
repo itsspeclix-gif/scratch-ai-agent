@@ -101,25 +101,37 @@ def run_once(
                 logger.info("skip comment=%s agent_reason=%s", comment.id, decision.reason)
                 continue
 
-            explicit_profile_invitation = is_explicit_profile_invitation(
-                comment.content
+            actions = {action.type: action for action in decision.actions}
+            model_profile_invitation = "comment_on_author_profile" in actions
+            model_project_invitation = "comment_on_linked_project" in actions
+            model_follow_request = "follow_author" in actions
+
+            profile_invitation = (
+                model_profile_invitation
+                or is_explicit_profile_invitation(comment.content)
             )
-            explicit_project_invitation = is_explicit_project_invitation(
-                comment.content
+            project_id = scratch_project_id(comment.content)
+            project_invitation = bool(
+                (model_project_invitation and project_id is not None)
+                or is_explicit_project_invitation(comment.content)
             )
-            explicit_follow_request = is_explicit_follow_request(comment.content)
-            project_id = (
-                scratch_project_id(comment.content)
-                if explicit_project_invitation
-                else None
+            follow_request = (
+                model_follow_request
+                or is_explicit_follow_request(comment.content)
             )
+            if model_project_invitation and project_id is None:
+                logger.warning(
+                    "ignore project action comment=%s reason=no linked Scratch "
+                    "project",
+                    comment.id,
+                )
             reply_text = (
                 "Sure, I'll leave a comment on your project."
-                if explicit_project_invitation
+                if project_invitation
                 else "Sure, I'll leave a comment on your profile."
-                if explicit_profile_invitation
+                if profile_invitation
                 else "Sure, I'll follow you."
-                if explicit_follow_request
+                if follow_request
                 else decision.reply
             )
             output = check_reply(reply_text, settings.max_reply_chars)
@@ -129,8 +141,12 @@ def run_once(
                 continue
 
             profile_comment = ""
-            proposed_profile_comment = decision.profile_comment
-            if explicit_profile_invitation and not proposed_profile_comment:
+            proposed_profile_comment = (
+                actions["comment_on_author_profile"].content
+                if model_profile_invitation
+                else decision.profile_comment
+            )
+            if profile_invitation and not proposed_profile_comment:
                 fallback = agent.generate_outreach(comment.author)
                 proposed_profile_comment = fallback.reply
                 logger.info(
@@ -140,7 +156,7 @@ def run_once(
                 )
 
             if proposed_profile_comment:
-                if not explicit_profile_invitation:
+                if not profile_invitation:
                     logger.warning(
                         "ignore profile action comment=%s reason=no explicit "
                         "author invitation",
@@ -160,14 +176,18 @@ def run_once(
                             comment.id,
                             profile_output.reason,
                         )
-            if explicit_profile_invitation and not profile_comment:
+            if profile_invitation and not profile_comment:
                 raise RuntimeError(
                     "Could not produce a safe invited profile comment"
                 )
 
             project_comment = ""
-            proposed_project_comment = decision.project_comment
-            if explicit_project_invitation and not proposed_project_comment:
+            proposed_project_comment = (
+                actions["comment_on_linked_project"].content
+                if model_project_invitation
+                else decision.project_comment
+            )
+            if project_invitation and not proposed_project_comment:
                 assert project_id is not None
                 fallback = agent.generate_project_invitation(
                     comment.author,
@@ -183,7 +203,7 @@ def run_once(
                 )
 
             if proposed_project_comment:
-                if not explicit_project_invitation:
+                if not project_invitation:
                     logger.warning(
                         "ignore project action comment=%s reason=no explicit "
                         "linked-project invitation",
@@ -203,7 +223,7 @@ def run_once(
                             comment.id,
                             project_output.reason,
                         )
-            if explicit_project_invitation and not project_comment:
+            if project_invitation and not project_comment:
                 raise RuntimeError(
                     "Could not produce a safe invited project comment"
                 )
@@ -229,7 +249,7 @@ def run_once(
                         project_id,
                         project_comment,
                     )
-                if explicit_follow_request:
+                if follow_request:
                     stats.follows_simulated += 1
                     logger.info(
                         "simulate follow request source_comment=%s author=%s",
@@ -267,7 +287,7 @@ def run_once(
                         comment.author,
                         created_id,
                     )
-                elif explicit_profile_invitation:
+                elif profile_invitation:
                     reply_text = (
                         "I already have a conversation open on your profile."
                     )
@@ -295,7 +315,7 @@ def run_once(
                         "I already have a conversation open on that project."
                     )
 
-            if explicit_follow_request:
+            if follow_request:
                 scratch.follow_user(comment.author)
                 stats.follows_posted += 1
                 if profile_comment or project_comment:

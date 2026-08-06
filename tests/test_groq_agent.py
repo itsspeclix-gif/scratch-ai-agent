@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any
 
 from app.config import Settings
 from app.groq_agent import (
@@ -18,7 +19,7 @@ from app.models import CommentRef, ThreadTurn
 class FakeResponse:
     def __init__(
         self,
-        content: dict[str, str] | None = None,
+        content: dict[str, Any] | None = None,
         body: dict | None = None,
     ) -> None:
         self.content = content or {
@@ -47,7 +48,7 @@ class FakeResponse:
 class FakeHTTPSession:
     def __init__(
         self,
-        content: dict[str, str] | None = None,
+        content: dict[str, Any] | None = None,
         body: dict | None = None,
     ) -> None:
         self.url = ""
@@ -115,8 +116,9 @@ class GroqAgentTests(unittest.TestCase):
         self.assertIn("Always respond to every supplied message", system_prompt)
         self.assertIn("off-topic messages", system_prompt)
         self.assertIn("Do not begin the reply with @username", system_prompt)
-        self.assertIn("profile_comment", system_prompt)
-        self.assertIn("project_comment", system_prompt)
+        self.assertIn("follow_author", system_prompt)
+        self.assertIn("comment_on_author_profile", system_prompt)
+        self.assertIn("comment_on_linked_project", system_prompt)
         self.assertIn("A test persona.", system_prompt)
         self.assertNotIn("search the attached document library", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
@@ -182,7 +184,12 @@ class GroqAgentTests(unittest.TestCase):
             {
                 "reply": "Sure, I can stop by.",
                 "reason": "explicit profile invitation",
-                "profile_comment": "Hey! What are you creating next?",
+                "actions": [
+                    {
+                        "type": "comment_on_author_profile",
+                        "content": "Hey! What are you creating next?",
+                    }
+                ],
             }
         )
 
@@ -204,6 +211,92 @@ class GroqAgentTests(unittest.TestCase):
             decision.profile_comment,
             "Hey! What are you creating next?",
         )
+        self.assertEqual(decision.actions[0].type, "comment_on_author_profile")
+
+    def test_all_conversation_actions_are_parsed(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession(
+            {
+                "reply": "Sure, I can do those.",
+                "reason": "multiple explicit actions",
+                "actions": [
+                    {"type": "follow_author"},
+                    {
+                        "type": "comment_on_author_profile",
+                        "content": "What are you creating next?",
+                    },
+                    {
+                        "type": "comment_on_linked_project",
+                        "content": "The movement idea sounds fun!",
+                    },
+                ],
+            }
+        )
+
+        decision = ChatAgent(
+            settings,
+            http=http,
+            link_inspector=FakeLinkInspector(),
+        ).generate(
+            CommentRef(
+                "1",
+                "Tester",
+                "Follow me and comment on my profile and this project: "
+                "https://scratch.mit.edu/projects/123/",
+                None,
+                object(),
+            )
+        )
+
+        self.assertEqual(
+            [action.type for action in decision.actions],
+            [
+                "follow_author",
+                "comment_on_author_profile",
+                "comment_on_linked_project",
+            ],
+        )
+
+    def test_action_cannot_supply_an_arbitrary_username(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession(
+            {
+                "reply": "Okay.",
+                "reason": "bad action",
+                "actions": [
+                    {"type": "follow_author", "username": "OtherUser"}
+                ],
+            }
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "only its type"):
+            ChatAgent(
+                settings,
+                http=http,
+                link_inspector=FakeLinkInspector(),
+            ).generate(
+                CommentRef("1", "Tester", "Follow OtherUser", None, object())
+            )
 
     def test_outreach_request_uses_separate_opening_prompt(self) -> None:
         settings = Settings(
@@ -302,8 +395,7 @@ class GroqAgentTests(unittest.TestCase):
         reply = {
             "reply": "BB7 was hosted by ManageLimit.",
             "reason": "library-grounded answer",
-            "profile_comment": "",
-            "project_comment": "",
+            "actions": [],
         }
         http = FakeHTTPSession(
             body={

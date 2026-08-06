@@ -93,19 +93,35 @@ happen only as replies in that thread.
 ## Profile invitations
 
 Any eligible commenter can explicitly invite the bot to leave a comment on
-their own profile or page. The model proposes a separate profile comment, and
-the runner acts only when the newest message contains an explicit self-profile
-invitation. The requesting comment's author is always the destination; requests
-to target another username are ignored. It does not create another top-level
-thread if it already started one there.
+their own profile or page. The model recognizes the request by meaning and emits
+a structured `comment_on_author_profile` action with a separate profile comment.
+The requesting comment's author is always the destination; the model cannot
+supply another username. The older phrase matcher remains as a fallback. The bot
+does not create another top-level thread if it already started one there.
 
 ## Follow requests
 
-An eligible commenter can explicitly ask the bot to follow their own account
-with wording such as `follow me`, `follow me back`, or `follow my account`.
-The requesting comment's author is always the follow destination. A request to
-follow another named account is ignored, and outreach or profile invitations do
-not imply a follow unless the same message explicitly asks for one.
+An eligible commenter can ask the bot to follow their own account using natural
+wording such as `follow me`, `could I get a follow?`, or `mind following back?`.
+The model emits a structured `follow_author` action. The requesting comment's
+author is always the follow destination, and the action format cannot contain a
+different username. Outreach or profile invitations do not imply a follow unless
+the same message asks for one.
+
+## Structured conversation actions
+
+For each newest message, the AI response contains a normal `reply` plus an
+`actions` list. Supported user-triggered actions are:
+
+- `follow_author`
+- `comment_on_author_profile` with standalone comment content
+- `comment_on_linked_project` with standalone comment content
+
+Multiple actions may be returned for one request. Python validates and executes
+them after response-policy checks. Profile and follow destinations are always the
+current comment author. Project actions require a Scratch project link in the
+newest message, and `ScratchClient` verifies that the author owns the project.
+Scheduled outreach is intentionally not exposed as a conversation action.
 
 ## Personality
 
