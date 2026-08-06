@@ -370,8 +370,87 @@ class ScratchClientThreadTests(unittest.TestCase):
             self.client,
             "_fresh_profile_page",
             side_effect=lambda source, page: source.comments(page=page),
+        ), patch(
+            "app.scratch_client.time.sleep",
         ):
             self.client.reply(comment, "Profile response")
+
+    def test_profile_reply_verification_retries_when_page_lags(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+            id = 10
+            parent_id = None
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class EmptySuccessResponse:
+            status_code = 200
+            text = ""
+            headers: dict[str, str] = {}
+
+        empty_root = FakeComment(
+            10,
+            "User",
+            "Hello",
+            replies=[],
+            source="profile",
+            source_id="Bot",
+        )
+        posted_root = FakeComment(
+            10,
+            "User",
+            "Hello",
+            replies=[
+                FakeComment(
+                    11,
+                    "Bot",
+                    "@User Profile response",
+                    parent_id=10,
+                    source="profile",
+                    source_id="Bot",
+                )
+            ],
+            source="profile",
+            source_id="Bot",
+        )
+        source = FakeUser([], {1: [empty_root], 2: []})
+        self.client._session = FakeSession()
+        self.client._sources = {("profile", "bot"): source}
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+        pages = [[], [posted_root]]
+
+        def fresh_profile_page(source: FakeUser, page: int) -> list[FakeComment]:
+            if page != 1:
+                return []
+            if pages:
+                return pages.pop(0)
+            return [posted_root]
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=EmptySuccessResponse(),
+        ), patch.object(
+            self.client,
+            "_fresh_profile_page",
+            side_effect=fresh_profile_page,
+        ), patch(
+            "app.scratch_client.time.sleep",
+        ) as sleep:
+            self.client.reply(comment, "Profile response")
+
+        sleep.assert_called_once_with(1)
 
     def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
         class RawProfileComment:
@@ -386,6 +465,7 @@ class ScratchClientThreadTests(unittest.TestCase):
         class EmptySuccessResponse:
             status_code = 200
             text = ""
+            headers: dict[str, str] = {}
 
         root = FakeComment(
             10,
@@ -417,6 +497,8 @@ class ScratchClientThreadTests(unittest.TestCase):
             self.client,
             "_fresh_profile_page",
             side_effect=lambda source, page: source.comments(page=page),
+        ), patch(
+            "app.scratch_client.time.sleep",
         ):
             with self.assertRaisesRegex(RuntimeError, "no created comment"):
                 self.client.reply(comment, "Profile response")

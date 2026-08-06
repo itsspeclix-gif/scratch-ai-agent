@@ -45,6 +45,17 @@ def _normalized_comment_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _profile_post_response_markers(text: str) -> str:
+    markers = {
+        "comment_id": "data-comment-id" in text or "comments-" in text,
+        "error_data": "error-data" in text,
+        "is_flood": "isFlood" in text,
+        "mute": "mute_status" in text,
+        "login": "modal-login" in text or "login" in text.lower(),
+    }
+    return ",".join(name for name, present in markers.items() if present) or "none"
+
+
 class _ProfileComment:
     def __init__(
         self,
@@ -742,12 +753,18 @@ class ScratchClient:
                         or error_body
                     )
         if not error_message:
-            verified_comment_id = self._verified_profile_post_id(
-                profile_username,
-                text,
-                parent_id=parent_id,
-                recipient_username=recipient_username,
-            )
+            verified_comment_id = None
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(1)
+                verified_comment_id = self._verified_profile_post_id(
+                    profile_username,
+                    text,
+                    parent_id=parent_id,
+                    recipient_username=recipient_username,
+                )
+                if verified_comment_id is not None:
+                    break
             if verified_comment_id is not None:
                 logger.info(
                     "profile comment accepted but response omitted id; "
@@ -756,7 +773,13 @@ class ScratchClient:
                 )
                 return verified_comment_id
         if not error_message:
-            error_message = "Scratch returned no created comment"
+            error_message = (
+                "Scratch returned no created comment "
+                f"(HTTP {response.status_code}, "
+                f"content-type={response.headers.get('content-type', 'unknown')}, "
+                f"body_length={len(response.text)}, "
+                f"markers={_profile_post_response_markers(response.text)})"
+            )
         raise RuntimeError(f"Profile comment was not accepted: {error_message[:200]}")
 
     def _profile_content_matches(
