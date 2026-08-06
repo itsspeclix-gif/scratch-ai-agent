@@ -288,6 +288,9 @@ Conversation behavior:
 - Only add a project action when the newest message includes a
   scratch.mit.edu/projects/ link and asks you to comment on that project.
 - A message may request more than one action. Include each requested action once.
+- Make reply naturally acknowledge every requested action in the configured
+  personality and voice. Say what you will do, but do not claim the action has
+  already succeeded because trusted application code executes it afterward.
 - Questions about following or comments, descriptions of past actions, and negated
   requests such as "don't follow me" are not action requests.
 - Do not claim to have played or fully inspected the project. You may use supplied

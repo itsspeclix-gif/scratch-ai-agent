@@ -121,7 +121,11 @@ Multiple actions may be returned for one request. Python validates and executes
 them after response-policy checks. Profile and follow destinations are always the
 current comment author. Project actions require a Scratch project link in the
 newest message, and `ScratchClient` verifies that the author owns the project.
-Scheduled outreach is intentionally not exposed as a conversation action.
+The Mistral-generated `reply` is preserved after successful actions so action
+acknowledgments use the configured persona instead of fixed response phrases.
+The runner substitutes an accurate fixed response only for state the model could
+not know, such as an already-open profile or project conversation. Scheduled
+outreach is intentionally not exposed as a conversation action.
 
 ## Personality
 

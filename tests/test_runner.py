@@ -92,11 +92,11 @@ class InvitingAgent(FakeAgent):
         )
 
 
-class ProfileLinkAskingAgent(FakeAgent):
+class PersonaProfileAgent(FakeAgent):
     def generate(self, comment: CommentRef) -> AgentDecision:
         return AgentDecision(
             True,
-            "Sure, what's your profile link?",
+            "Absolutely — I'll drop by!",
             "explicit profile invitation",
             profile_comment="Hey! What are you creating next?",
         )
@@ -204,7 +204,7 @@ class RunnerTests(unittest.TestCase):
         stats = run_once(
             self.settings,
             scratch,
-            ProfileLinkAskingAgent(),
+            PersonaProfileAgent(),
             logging.getLogger("test"),
         )
 
@@ -215,7 +215,7 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             scratch.posted,
-            [("1", "Done, I left a comment on your profile.")],
+            [("1", "Absolutely — I'll drop by!")],
         )
 
     def test_semantic_profile_action_handles_unlisted_wording(self) -> None:
@@ -273,7 +273,7 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             scratch.posted,
-            [("1", "Done, I left a comment on your profile.")],
+            [("1", "Safe response.")],
         )
 
     def test_existing_profile_thread_gets_accurate_acknowledgment(self) -> None:
@@ -354,7 +354,7 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             scratch.posted,
-            [("1", "Done, I left a comment on your project.")],
+            [("1", "Sure, I can visit it.")],
         )
 
     def test_semantic_project_action_handles_unlisted_wording(self) -> None:
@@ -486,7 +486,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(scratch.followed_users, ["Tester"])
         self.assertEqual(
             scratch.posted,
-            [("1", "Done, I followed you.")],
+            [("1", "Safe response.")],
         )
 
     def test_semantic_follow_action_handles_unlisted_wording(self) -> None:
@@ -510,7 +510,7 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(stats.follows_posted, 1)
         self.assertEqual(scratch.followed_users, ["Tester"])
-        self.assertEqual(scratch.posted, [("1", "Done, I followed you.")])
+        self.assertEqual(scratch.posted, [("1", "Okay, I can do that.")])
 
     def test_structured_actions_can_be_combined(self) -> None:
         comment = CommentRef(
@@ -540,6 +540,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(stats.profile_invites_posted, 1)
         self.assertEqual(stats.follows_posted, 1)
         self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(scratch.posted, [("1", "Okay, I can do that.")])
 
     def test_follow_request_can_be_combined_with_profile_invitation(self) -> None:
         comment = CommentRef(
@@ -564,10 +565,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(scratch.followed_users, ["Tester"])
         self.assertEqual(
             scratch.posted,
-            [(
-                "1",
-                "Done, I left a comment on your profile and followed you.",
-            )],
+            [("1", "Sure, I can stop by.")],
         )
 
     def test_third_party_follow_request_does_not_follow_anyone(self) -> None:

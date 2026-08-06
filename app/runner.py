@@ -125,15 +125,10 @@ def run_once(
                     "project",
                     comment.id,
                 )
-            reply_text = (
-                "Sure, I'll leave a comment on your project."
-                if project_invitation
-                else "Sure, I'll leave a comment on your profile."
-                if profile_invitation
-                else "Sure, I'll follow you."
-                if follow_request
-                else decision.reply
-            )
+            # The model's configured persona owns the conversational reply. The
+            # runner changes it only when the requested destination already has
+            # an open bot conversation and the model could not know that state.
+            reply_text = decision.reply
             output = check_reply(reply_text, settings.max_reply_chars)
             if not output.allowed:
                 stats.skipped_policy += 1
@@ -278,7 +273,6 @@ def run_once(
                     profile_comment,
                 )
                 if created_id is not None:
-                    reply_text = "Done, I left a comment on your profile."
                     stats.profile_invites_posted += 1
                     logger.info(
                         "posted profile invitation source_comment=%s author=%s "
@@ -300,7 +294,6 @@ def run_once(
                     project_comment,
                 )
                 if created_id is not None:
-                    reply_text = "Done, I left a comment on your project."
                     stats.project_invites_posted += 1
                     logger.info(
                         "posted project invitation source_comment=%s "
@@ -318,10 +311,6 @@ def run_once(
             if follow_request:
                 scratch.follow_user(comment.author)
                 stats.follows_posted += 1
-                if profile_comment or project_comment:
-                    reply_text = reply_text.rstrip(".") + " and followed you."
-                else:
-                    reply_text = "Done, I followed you."
                 logger.info(
                     "followed requested user source_comment=%s author=%s",
                     comment.id,
