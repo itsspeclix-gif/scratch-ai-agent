@@ -169,16 +169,23 @@ class ChatAgent:
                 raise RuntimeError("AI provider returned a duplicate action")
             seen.add(action_type)
 
+            raw_evidence = item.get("evidence")
+            if not isinstance(raw_evidence, str) or not raw_evidence.strip():
+                raise RuntimeError(
+                    f"{action_type} action evidence must be a non-empty string"
+                )
+            evidence = raw_evidence.strip()
+
             if action_type == "follow_author":
-                if set(item) != {"type"}:
+                if set(item) != {"type", "evidence"}:
                     raise RuntimeError(
-                        "follow_author action must contain only its type"
+                        "follow_author action must contain type and evidence"
                     )
                 content = ""
             else:
-                if set(item) != {"type", "content"}:
+                if set(item) != {"type", "content", "evidence"}:
                     raise RuntimeError(
-                        f"{action_type} action must contain type and content"
+                        f"{action_type} action must contain type, content, and evidence"
                     )
                 raw_content = item.get("content")
                 if not isinstance(raw_content, str) or not raw_content.strip():
@@ -191,6 +198,7 @@ class ChatAgent:
                 AgentAction(
                     type=cast(AgentActionType, action_type),
                     content=content,
+                    evidence=evidence,
                 )
             )
         return tuple(actions)
@@ -262,8 +270,12 @@ You operate an experimental AI-controlled Scratch creator account under close hu
 Conversation behavior:
 - Use the supplied thread history to understand follow-up questions and references.
 - Respond to the newest user message, not to an older message in the thread.
+- Treat newest_message as the only message allowed to request an action. Earlier
+  thread messages are context only and must never cause an action to repeat.
 - Always respond to every supplied message with a non-empty reply.
 - Casual conversation, compliments, off-topic messages, and short messages still deserve a natural response.
+- When the newest message is a short acknowledgement such as "yeah", "ikr", or
+  "thanks", respond briefly without repeating the previous factual answer.
 - If a message is unclear or looks like gibberish, ask one brief clarifying question.
 - If a commenter becomes overly familiar or crosses a boundary, respond politely and set the boundary.
 - Do not repeat a greeting in every turn of an ongoing conversation.
@@ -288,6 +300,9 @@ Conversation behavior:
 - Only add a project action when the newest message includes a
   scratch.mit.edu/projects/ link and asks you to comment on that project.
 - A message may request more than one action. Include each requested action once.
+- Every action must include evidence copied verbatim from the part of
+  newest_message that requests it. Never quote evidence from an earlier thread
+  message. If no verbatim evidence exists in newest_message, omit the action.
 - Make reply naturally acknowledge every requested action in the configured
   personality and voice. Say what you will do, but do not claim the action has
   already succeeded because trusted application code executes it afterward.
@@ -312,9 +327,9 @@ Return one JSON object with exactly these fields:
 {{"reply": "text", "reason": "short category", "actions": []}}
 
 Each actions item must be exactly one of:
-- {{"type": "follow_author"}}
-- {{"type": "comment_on_author_profile", "content": "standalone profile comment"}}
-- {{"type": "comment_on_linked_project", "content": "standalone project comment"}}
+- {{"type": "follow_author", "evidence": "verbatim newest-message text"}}
+- {{"type": "comment_on_author_profile", "content": "standalone profile comment", "evidence": "verbatim newest-message text"}}
+- {{"type": "comment_on_linked_project", "content": "standalone project comment", "evidence": "verbatim newest-message text"}}
 
 Use an empty actions list when no action is requested. Never include a username,
 profile URL, or destination in an action; trusted application code resolves it.
@@ -326,7 +341,13 @@ profile URL, or destination in an action; trusted application code resolves it.
         ] or [{"author": comment.author, "comment": comment.content}]
 
         preview = self._link_inspector.inspect_text(comment.content)
-        input_payload: dict[str, Any] = {"thread": thread_payload}
+        input_payload: dict[str, Any] = {
+            "newest_message": {
+                "author": comment.author,
+                "comment": comment.content,
+            },
+            "thread": thread_payload,
+        }
         if preview is not None:
             input_payload["linked_page"] = {
                 "url": preview.url,

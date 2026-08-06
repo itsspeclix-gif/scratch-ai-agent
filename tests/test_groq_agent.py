@@ -123,6 +123,7 @@ class GroqAgentTests(unittest.TestCase):
         self.assertNotIn("search the attached document library", system_prompt)
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
+        self.assertIn('"newest_message"', transcript)
         self.assertIn("How did you make it?", transcript)
         self.assertIn("I used clones.", transcript)
         self.assertIn("What about level two?", transcript)
@@ -188,6 +189,7 @@ class GroqAgentTests(unittest.TestCase):
                     {
                         "type": "comment_on_author_profile",
                         "content": "Hey! What are you creating next?",
+                        "evidence": "comment on my profile",
                     }
                 ],
             }
@@ -230,14 +232,19 @@ class GroqAgentTests(unittest.TestCase):
                 "reply": "Sure, I can do those.",
                 "reason": "multiple explicit actions",
                 "actions": [
-                    {"type": "follow_author"},
+                    {
+                        "type": "follow_author",
+                        "evidence": "Follow me",
+                    },
                     {
                         "type": "comment_on_author_profile",
                         "content": "What are you creating next?",
+                        "evidence": "comment on my profile",
                     },
                     {
                         "type": "comment_on_linked_project",
                         "content": "The movement idea sounds fun!",
+                        "evidence": "this project",
                     },
                 ],
             }
@@ -284,12 +291,16 @@ class GroqAgentTests(unittest.TestCase):
                 "reply": "Okay.",
                 "reason": "bad action",
                 "actions": [
-                    {"type": "follow_author", "username": "OtherUser"}
+                    {
+                        "type": "follow_author",
+                        "evidence": "Follow OtherUser",
+                        "username": "OtherUser",
+                    }
                 ],
             }
         )
 
-        with self.assertRaisesRegex(RuntimeError, "only its type"):
+        with self.assertRaisesRegex(RuntimeError, "type and evidence"):
             ChatAgent(
                 settings,
                 http=http,

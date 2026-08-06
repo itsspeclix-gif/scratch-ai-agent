@@ -113,13 +113,18 @@ class ProjectInvitingAgent(FakeAgent):
 
 
 class StructuredActionAgent(FakeAgent):
-    def __init__(self, *actions: AgentAction) -> None:
+    def __init__(
+        self,
+        *actions: AgentAction,
+        reply: str = "Okay, I can do that.",
+    ) -> None:
         self.actions = actions
+        self.reply = reply
 
     def generate(self, comment: CommentRef) -> AgentDecision:
         return AgentDecision(
             True,
-            "Okay, I can do that.",
+            self.reply,
             "semantic action request",
             actions=self.actions,
         )
@@ -231,7 +236,8 @@ class RunnerTests(unittest.TestCase):
         agent = StructuredActionAgent(
             AgentAction(
                 "comment_on_author_profile",
-                "What kind of project are you making next?",
+                content="What kind of project are you making next?",
+                evidence="write something over on my page",
             )
         )
 
@@ -246,6 +252,80 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(
             scratch.profile_invitation_posts,
             [("Tester", "What kind of project are you making next?")],
+        )
+
+    def test_mid_sentence_profile_action_keeps_original_thread_reply(self) -> None:
+        comment = CommentRef(
+            "2",
+            "Tester",
+            "Also, drop a note on my page sometime, but who might win BB8?",
+            "1",
+            object(),
+            root_id="1",
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction(
+                "comment_on_author_profile",
+                content="What are you creating next?",
+                evidence="drop a note on my page",
+            ),
+            reply="BB8 looks competitive; I don't have a certain pick yet.",
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "What are you creating next?")],
+        )
+        self.assertEqual(
+            scratch.posted,
+            [("2", "BB8 looks competitive; I don't have a certain pick yet.")],
+        )
+
+    def test_action_evidence_from_older_thread_message_is_ignored(self) -> None:
+        comment = CommentRef(
+            "3",
+            "Tester",
+            "Who do you think will win BB8?",
+            "1",
+            object(),
+            root_id="1",
+            thread=(
+                ThreadTurn("1", "Tester", "Comment on my profile"),
+                ThreadTurn("2", "Bot", "I'll drop a quick comment there!"),
+                ThreadTurn("3", "Tester", "Who do you think will win BB8?"),
+            ),
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction(
+                "comment_on_author_profile",
+                content="What are you making next?",
+                evidence="Comment on my profile",
+            ),
+            reply="BB8 is close, so I don't have a confident pick yet.",
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.profile_invites_posted, 0)
+        self.assertEqual(scratch.profile_invitation_posts, [])
+        self.assertEqual(
+            scratch.posted,
+            [("3", "BB8 is close, so I don't have a confident pick yet.")],
         )
 
     def test_explicit_invitation_falls_back_when_model_omits_action(self) -> None:
@@ -370,7 +450,8 @@ class RunnerTests(unittest.TestCase):
         agent = StructuredActionAgent(
             AgentAction(
                 "comment_on_linked_project",
-                "The movement concept sounds interesting. What's next?",
+                content="The movement concept sounds interesting. What's next?",
+                evidence="Tell me what stands out",
             )
         )
 
@@ -404,7 +485,11 @@ class RunnerTests(unittest.TestCase):
         )
         scratch = FakeScratch([comment])
         agent = StructuredActionAgent(
-            AgentAction("comment_on_linked_project", "It sounds interesting!")
+            AgentAction(
+                "comment_on_linked_project",
+                content="It sounds interesting!",
+                evidence="share your thoughts on my game",
+            )
         )
 
         stats = run_once(
@@ -499,7 +584,12 @@ class RunnerTests(unittest.TestCase):
             root_id="1",
         )
         scratch = FakeScratch([comment])
-        agent = StructuredActionAgent(AgentAction("follow_author"))
+        agent = StructuredActionAgent(
+            AgentAction(
+                "follow_author",
+                evidence="mind following back",
+            )
+        )
 
         stats = run_once(
             self.settings,
@@ -523,10 +613,14 @@ class RunnerTests(unittest.TestCase):
         )
         scratch = FakeScratch([comment])
         agent = StructuredActionAgent(
-            AgentAction("follow_author"),
+            AgentAction(
+                "follow_author",
+                evidence="Mind following back",
+            ),
             AgentAction(
                 "comment_on_author_profile",
-                "What are you creating next?",
+                content="What are you creating next?",
+                evidence="writing something over on my page",
             ),
         )
 

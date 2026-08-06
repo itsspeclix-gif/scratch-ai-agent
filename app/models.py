@@ -39,6 +39,7 @@ class AgentAction:
 
     type: AgentActionType
     content: str = ""
+    evidence: str = ""
 
 
 @dataclass(frozen=True)

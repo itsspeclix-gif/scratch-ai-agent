@@ -121,6 +121,11 @@ Multiple actions may be returned for one request. Python validates and executes
 them after response-policy checks. Profile and follow destinations are always the
 current comment author. Project actions require a Scratch project link in the
 newest message, and `ScratchClient` verifies that the author owns the project.
+Every model action must also include a verbatim evidence quote from the newest
+message. The runner rejects an action when that evidence exists only in older
+thread history, preventing a past profile, project, or follow request from being
+repeated on a later conversational turn. Invitations may appear anywhere in the
+newest message and the normal reply still posts in the original thread.
 The Mistral-generated `reply` is preserved after successful actions so action
 acknowledgments use the configured persona instead of fixed response phrases.
 The runner substitutes an accurate fixed response only for state the model could

@@ -4,7 +4,7 @@ import logging
 from typing import Protocol
 
 from app.config import Settings
-from app.models import AgentDecision, CommentRef, RunStats
+from app.models import AgentAction, AgentDecision, CommentRef, RunStats
 from app.policy import (
     check_incoming,
     check_reply,
@@ -50,6 +50,12 @@ class AgentProtocol(Protocol):
         username: str,
         project_id: str,
     ) -> AgentDecision: ...
+
+
+def _action_evidence_matches(action: AgentAction, newest_message: str) -> bool:
+    evidence = " ".join(action.evidence.casefold().split())
+    newest = " ".join(newest_message.casefold().split())
+    return bool(evidence) and evidence in newest
 
 
 def run_once(
@@ -101,7 +107,17 @@ def run_once(
                 logger.info("skip comment=%s agent_reason=%s", comment.id, decision.reason)
                 continue
 
-            actions = {action.type: action for action in decision.actions}
+            actions: dict[str, AgentAction] = {}
+            for action in decision.actions:
+                if _action_evidence_matches(action, comment.content):
+                    actions[action.type] = action
+                else:
+                    logger.warning(
+                        "ignore model action comment=%s action=%s reason=evidence "
+                        "not found in newest message",
+                        comment.id,
+                        action.type,
+                    )
             model_profile_invitation = "comment_on_author_profile" in actions
             model_project_invitation = "comment_on_linked_project" in actions
             model_follow_request = "follow_author" in actions
