@@ -41,6 +41,10 @@ def _strip_leading_author_mentions(text: str, author: str) -> str:
     return mention.sub("", text).strip()
 
 
+def _normalized_comment_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
 class _ProfileComment:
     def __init__(
         self,
@@ -689,6 +693,7 @@ class ScratchClient:
         *,
         parent_id: str = "",
         commentee_id: Any = "",
+        recipient_username: str | None = None,
     ) -> str:
         url = (
             "https://scratch.mit.edu/site-api/comments/user/"
@@ -737,8 +742,61 @@ class ScratchClient:
                         or error_body
                     )
         if not error_message:
+            verified_comment_id = self._verified_profile_post_id(
+                profile_username,
+                text,
+                parent_id=parent_id,
+                recipient_username=recipient_username,
+            )
+            if verified_comment_id is not None:
+                logger.info(
+                    "profile comment accepted but response omitted id; "
+                    "verified created_comment=%s",
+                    verified_comment_id,
+                )
+                return verified_comment_id
+        if not error_message:
             error_message = "Scratch returned no created comment"
         raise RuntimeError(f"Profile comment was not accepted: {error_message[:200]}")
+
+    def _profile_content_matches(
+        self,
+        content: str,
+        text: str,
+        recipient_username: str | None,
+    ) -> bool:
+        actual = _normalized_comment_text(content)
+        expected = _normalized_comment_text(text)
+        if recipient_username:
+            actual = _normalized_comment_text(
+                _strip_leading_author_mentions(actual, recipient_username)
+            )
+        return actual == expected
+
+    def _verified_profile_post_id(
+        self,
+        profile_username: str,
+        text: str,
+        *,
+        parent_id: str = "",
+        recipient_username: str | None = None,
+    ) -> str | None:
+        source = self._connect_source("profile", profile_username)
+        bot_name = self._settings.scratch_username.casefold()
+        candidates: list[Any]
+        if parent_id:
+            root = self._profile_root_by_id(source, parent_id)
+            candidates = self._all_replies(root) if root is not None else []
+        else:
+            candidates = self._fresh_profile_page(source, 1)
+
+        for candidate in candidates:
+            if str(getattr(candidate, "author_name", "")).casefold() != bot_name:
+                continue
+            content = str(getattr(candidate, "content", "") or "")
+            if self._profile_content_matches(content, text, recipient_username):
+                return str(getattr(candidate, "id", "") or "") or None
+        return None
 
     def _post_profile_reply(
         self,
@@ -771,6 +829,7 @@ class ScratchClient:
             text,
             parent_id=parent_id,
             commentee_id=commentee_id,
+            recipient_username=comment.author,
         )
         logger.info(
             "profile reply accepted source_comment=%s created_comment=%s parent=%s",

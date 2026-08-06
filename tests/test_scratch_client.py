@@ -317,6 +317,110 @@ class ScratchClientThreadTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "isFlood"):
                 self.client.reply(comment, "Profile response")
 
+    def test_profile_reply_verifies_success_when_response_omits_id(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+            id = 10
+            parent_id = None
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class EmptySuccessResponse:
+            status_code = 200
+            text = ""
+
+        root = FakeComment(
+            10,
+            "User",
+            "Hello",
+            replies=[
+                FakeComment(
+                    11,
+                    "Bot",
+                    "@User Profile response",
+                    parent_id=10,
+                    source="profile",
+                    source_id="Bot",
+                )
+            ],
+            source="profile",
+            source_id="Bot",
+        )
+        source = FakeUser([], {1: [root], 2: []})
+        self.client._session = FakeSession()
+        self.client._sources = {("profile", "bot"): source}
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=EmptySuccessResponse(),
+        ), patch.object(
+            self.client,
+            "_fresh_profile_page",
+            side_effect=lambda source, page: source.comments(page=page),
+        ):
+            self.client.reply(comment, "Profile response")
+
+    def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
+        class RawProfileComment:
+            author_id = 42
+            id = 10
+            parent_id = None
+
+        class FakeSession:
+            _headers: dict[str, str] = {}
+            _cookies: dict[str, str] = {}
+
+        class EmptySuccessResponse:
+            status_code = 200
+            text = ""
+
+        root = FakeComment(
+            10,
+            "User",
+            "Hello",
+            replies=[],
+            source="profile",
+            source_id="Bot",
+        )
+        source = FakeUser([], {1: [root], 2: []})
+        self.client._session = FakeSession()
+        self.client._sources = {("profile", "bot"): source}
+        self.client._profile_user_ids = {}
+        comment = CommentRef(
+            "10",
+            "User",
+            "Hello",
+            None,
+            RawProfileComment(),
+            root_id="10",
+            source="profile",
+            source_id="Bot",
+        )
+
+        with patch(
+            "app.scratch_client.requests.post",
+            return_value=EmptySuccessResponse(),
+        ), patch.object(
+            self.client,
+            "_fresh_profile_page",
+            side_effect=lambda source, page: source.comments(page=page),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no created comment"):
+                self.client.reply(comment, "Profile response")
+
     def test_project_reply_keeps_standard_response_handling(self) -> None:
         raw = FakeComment(10, "User", "Hello")
         comment = CommentRef(
