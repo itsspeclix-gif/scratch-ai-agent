@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from typing import Any
 
 import requests
@@ -12,6 +14,19 @@ from app.models import AgentDecision, CommentRef
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
 MISTRAL_CONVERSATIONS_URL = "https://api.mistral.ai/v1/conversations"
+
+_SHORT_GREETING = re.compile(
+    r"^\s*(?:h+i+|h+e+l+o+|h+e+y+|hiya+|howdy|yo+|sup|what'?s\s+up)"
+    r"[!?.\s]*$",
+    re.IGNORECASE,
+)
+_GREETING_FOCUSES = (
+    "what Scratch project they are currently making",
+    "a game idea they are excited about",
+    "whether they prefer coding, art, or animation",
+    "what they most enjoy creating on Scratch",
+    "a creative idea they want to try next",
+)
 
 
 class ChatAgent:
@@ -200,6 +215,9 @@ Conversation behavior:
 - Respond to the newest user message, not to an older message in the thread.
 - Always respond to every supplied message with a non-empty reply.
 - Casual conversation, compliments, off-topic messages, and short messages still deserve a natural response.
+- When the newest message is only a greeting, do not answer with only hello, hi,
+  hey, or a stock "what's up?" Add one brief Scratch-related question using the
+  supplied short_greeting_focus, and vary the wording naturally.
 - If a message is unclear or looks like gibberish, ask one brief clarifying question.
 - If a commenter becomes overly familiar or crosses a boundary, respond politely and set the boundary.
 - Do not repeat a greeting in every turn of an ongoing conversation.
@@ -245,6 +263,11 @@ Return one JSON object with exactly these fields:
 
         preview = self._link_inspector.inspect_text(comment.content)
         input_payload: dict[str, Any] = {"thread": thread_payload}
+        if _SHORT_GREETING.fullmatch(comment.content):
+            digest = hashlib.sha256(str(comment.id).encode("utf-8")).digest()
+            input_payload["short_greeting_focus"] = _GREETING_FOCUSES[
+                int.from_bytes(digest[:2], "big") % len(_GREETING_FOCUSES)
+            ]
         if preview is not None:
             input_payload["linked_page"] = {
                 "url": preview.url,

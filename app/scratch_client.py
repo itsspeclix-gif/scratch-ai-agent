@@ -76,14 +76,30 @@ def _json_profile_comment_id(body: Any) -> str | None:
 
 def _json_profile_error(body: Any) -> str:
     if isinstance(body, str):
-        normalized = re.sub(r"\s+", " ", body).strip().casefold()
+        compact = re.sub(r"\s+", " ", body).strip()
+        normalized = compact.casefold()
         if "same comment" in normalized and "spam" in normalized:
             return "Scratch rejected the profile comment as duplicate spam"
         if "commenting really quickly" in normalized:
             return "Scratch rate-limited the profile comment"
         if "comments have been turned off" in normalized:
             return "Scratch comments are disabled on this profile"
-        return ""
+        if "bad word" in normalized or "community guidelines" in normalized:
+            return "Scratch's moderation filter rejected the profile comment"
+        if "unmoderated chat" in normalized:
+            return "Scratch rejected a disallowed chat-site reference"
+        if "private information" in normalized:
+            return "Scratch rejected possible private information"
+        if (
+            "account has been muted" in normalized
+            or "paused from commenting" in normalized
+        ):
+            return "Scratch has temporarily muted profile commenting"
+        fingerprint = hashlib.sha256(compact.encode("utf-8")).hexdigest()[:12]
+        return (
+            "Scratch returned an unrecognized profile comment error "
+            f"(text_length={len(compact)}, sha256={fingerprint})"
+        )
     if isinstance(body, dict):
         if "mute_status" in body:
             return "mute_status"

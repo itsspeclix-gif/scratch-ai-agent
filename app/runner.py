@@ -308,6 +308,12 @@ def run_once(
                     comment.author,
                 )
 
+            logger.info(
+                "prepared reply comment=%s author=%s reply=%r",
+                comment.id,
+                comment.author,
+                reply_text,
+            )
             scratch.reply(comment, reply_text)
             stats.posted += 1
             logger.info(

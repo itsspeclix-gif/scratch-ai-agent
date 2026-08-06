@@ -166,6 +166,30 @@ class GroqAgentTests(unittest.TestCase):
             ["What do you think? https://example.com/game"],
         )
 
+    def test_short_greeting_gets_a_stable_varied_focus(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession()
+
+        ChatAgent(settings, http=http).generate(
+            CommentRef("415116819", "Tester", "hiii", None, object())
+        )
+
+        prompt = http.payload["messages"][0]["content"]
+        supplied = http.payload["messages"][1]["content"]
+        self.assertIn("do not answer with only hello", prompt)
+        self.assertIn("short_greeting_focus", supplied)
+        self.assertIn("Scratch", supplied)
+
     def test_profile_invitation_action_is_parsed(self) -> None:
         settings = Settings(
             scratch_username="Bot",

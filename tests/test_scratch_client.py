@@ -483,6 +483,11 @@ class ScratchClientThreadTests(unittest.TestCase):
             _json_profile_error([{"errors": ["comments have been turned off"]}]),
             "Scratch comments are disabled on this profile",
         )
+        unknown = _json_profile_error(["unexpected safe test error"])
+        self.assertRegex(
+            unknown,
+            r"unrecognized profile comment error \(text_length=26, sha256=[0-9a-f]{12}\)",
+        )
 
     def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
         class RawProfileComment:
