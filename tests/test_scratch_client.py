@@ -434,7 +434,7 @@ class FakeSession:
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
-    def test_notification_count_endpoint_sets_message_fetch_limit(self) -> None:
+    def test_notification_count_endpoint_does_not_block_message_fetch(self) -> None:
         settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
@@ -461,7 +461,7 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             ok = True
 
             def json(self) -> dict[str, int]:
-                return {"count": 2}
+                return {"count": 0}
 
         def target(message: object) -> CommentRef:
             comment_id = str(getattr(message, "comment_id"))
@@ -474,10 +474,10 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         ):
             targets = client.conversation_targets()
 
-        self.assertEqual(session.message_limits, [2])
-        self.assertEqual({target.id for target in targets}, {"1", "2"})
+        self.assertEqual(session.message_limits, [40])
+        self.assertEqual({target.id for target in targets}, {"1", "2", "3"})
 
-    def test_notification_count_failure_skips_run(self) -> None:
+    def test_notification_count_failure_still_fetches_messages(self) -> None:
         settings = Settings(
             scratch_username="Bot",
             scratch_session_string="fake",
@@ -489,11 +489,19 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
             max_reply_chars=500,
             persona="Test",
         )
-        session = FakeSession([object()])
+        messages = [
+            SimpleNamespace(comment_id="1"),
+            SimpleNamespace(comment_id="2"),
+        ]
+        session = FakeSession(messages)
         session._username = "Bot"  # type: ignore[attr-defined]
         client = ScratchClient.__new__(ScratchClient)
         client._settings = settings
         client._session = session
+
+        def target(message: object) -> CommentRef:
+            comment_id = str(getattr(message, "comment_id"))
+            return CommentRef(comment_id, "Tester", "Hi", None, object())
 
         with (
             patch(
@@ -501,12 +509,14 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
                 side_effect=RuntimeError("Scratch auth failed"),
             ),
             patch.object(client, "_full_scan_due", return_value=False),
+            patch.object(client, "_notification_target", side_effect=target),
         ):
             targets = client.conversation_targets()
 
-        self.assertEqual(targets, [])
+        self.assertEqual(session.message_limits, [40])
+        self.assertEqual({target.id for target in targets}, {"1", "2"})
         self.assertFalse(client._notification_scan_complete)
-        self.assertEqual(client._unread_message_count, 0)
+        self.assertEqual(client._unread_message_count, 2)
 
     def test_full_scan_is_disabled_by_default(self) -> None:
         settings = Settings(

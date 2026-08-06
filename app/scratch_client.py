@@ -448,21 +448,21 @@ class ScratchClient:
             self._notification_scan_complete = False
             self._unread_message_count = 0
             logger.warning(
-                "failed checking Scratch notifications; skipping this run: %r",
+                "failed checking Scratch notification count; fetching mail "
+                "anyway: %r",
                 exc,
             )
-            return []
-        if self._unread_message_count <= 0:
-            return []
 
         try:
-            messages = list(
-                self._session.messages(limit=self._unread_message_count) or []
-            )
+            fetch_limit = max(self._unread_message_count, PAGE_SIZE)
+            messages = list(self._session.messages(limit=fetch_limit) or [])
         except Exception:
             self._notification_scan_complete = False
             logger.exception("failed loading Scratch notifications")
             return []
+
+        if self._unread_message_count <= 0:
+            self._unread_message_count = len(messages)
 
         result: list[CommentRef] = []
         for message in messages:
