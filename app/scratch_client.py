@@ -77,6 +77,8 @@ def _json_profile_comment_id(body: Any) -> str | None:
 def _json_profile_error(body: Any) -> str:
     if isinstance(body, str):
         compact = re.sub(r"\s+", " ", body).strip()
+        if not compact:
+            return ""
         normalized = compact.casefold()
         if "same comment" in normalized and "spam" in normalized:
             return "Scratch rejected the profile comment as duplicate spam"
@@ -95,11 +97,7 @@ def _json_profile_error(body: Any) -> str:
             or "paused from commenting" in normalized
         ):
             return "Scratch has temporarily muted profile commenting"
-        fingerprint = hashlib.sha256(compact.encode("utf-8")).hexdigest()[:12]
-        return (
-            "Scratch returned an unrecognized profile comment error "
-            f"(text_length={len(compact)}, sha256={fingerprint})"
-        )
+        return ""
     if isinstance(body, dict):
         if "mute_status" in body:
             return "mute_status"
@@ -121,6 +119,66 @@ def _json_profile_error(body: Any) -> str:
             if nested:
                 return nested
     return ""
+
+
+def _json_profile_response_shape(body: Any, depth: int = 0) -> str:
+    if body is None:
+        return "null"
+    if isinstance(body, str):
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        return f"str(len={len(body)},sha256={digest})"
+    if isinstance(body, bool):
+        return "bool"
+    if isinstance(body, (int, float)):
+        return type(body).__name__
+    if depth >= 2:
+        if isinstance(body, dict):
+            return f"dict(len={len(body)})"
+        if isinstance(body, list):
+            return f"list(len={len(body)})"
+        return type(body).__name__
+    if isinstance(body, list):
+        items = ",".join(
+            _json_profile_response_shape(item, depth + 1) for item in body[:4]
+        )
+        if len(body) > 4:
+            items += ",..."
+        return f"list(len={len(body)},items=[{items}])"
+    if isinstance(body, dict):
+        known_names = (
+            "id",
+            "comment_id",
+            "commentId",
+            "comment",
+            "message",
+            "error",
+            "errors",
+            "code",
+            "mute_status",
+            "content",
+            "parent_id",
+        )
+        keys = ",".join(name for name in known_names if name in body) or "none"
+        values = ",".join(
+            _json_profile_response_shape(value, depth + 1)
+            for value in list(body.values())[:4]
+        )
+        if len(body) > 4:
+            values += ",..."
+        return f"dict(len={len(body)},known_keys={keys},values=[{values}])"
+    return type(body).__name__
+
+
+def _profile_session_username(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    user = body.get("user")
+    if not isinstance(user, dict):
+        return None
+    username = user.get("username")
+    if not isinstance(username, str) or not username.strip():
+        return None
+    return username.strip()
 
 
 class _ProfileComment:
@@ -200,6 +258,37 @@ class ScratchClient:
             raise RuntimeError(
                 "SCRATCH_SESSION_STRING belongs to a different account: "
                 f"expected {settings.scratch_username}, received {actual_username}"
+            )
+        session_response = requests.post(
+            "https://scratch.mit.edu/session",
+            headers=getattr(self._session, "_headers", {}),
+            cookies=getattr(self._session, "_cookies", {}),
+            timeout=30,
+        )
+        if not 200 <= session_response.status_code < 300:
+            raise RuntimeError(
+                "Scratch rejected the profile-session validation "
+                f"(HTTP {session_response.status_code})"
+            )
+        try:
+            session_body = session_response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                "Scratch returned an invalid profile-session response"
+            ) from exc
+        authenticated_username = _profile_session_username(session_body)
+        if authenticated_username is None:
+            raise RuntimeError(
+                "SCRATCH_SESSION_STRING no longer authenticates Scratch profile "
+                "actions. Generate a fresh session string and replace the GitHub "
+                "secret. The embedded API token may still read messages even when "
+                "the profile-session cookie has expired."
+            )
+        if authenticated_username.casefold() != settings.scratch_username.casefold():
+            raise RuntimeError(
+                "Scratch authenticated the profile session as a different account: "
+                f"expected {settings.scratch_username}, received "
+                f"{authenticated_username}"
             )
         self._user = self._session.connect_linked_user()
         self._sources: dict[tuple[str, str], Any] = {
@@ -854,7 +943,7 @@ class ScratchClient:
                 f"content-type={response.headers.get('content-type', 'unknown')}, "
                 f"body_length={len(response.text)}, "
                 f"markers={_profile_post_response_markers(response.text)}, "
-                f"json_type={type(json_body).__name__})"
+                f"json_shape={_json_profile_response_shape(json_body)})"
             )
         raise RuntimeError(f"Profile comment was not accepted: {error_message[:200]}")
 

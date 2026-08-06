@@ -11,6 +11,8 @@ from app.scratch_client import (
     ScratchClient,
     _json_profile_comment_id,
     _json_profile_error,
+    _json_profile_response_shape,
+    _profile_session_username,
 )
 
 
@@ -81,6 +83,17 @@ class ScratchClientThreadTests(unittest.TestCase):
         self.assertEqual(target.id, "3")
         self.assertEqual(target.parent_id, "1")
         self.assertEqual([turn.id for turn in target.thread], ["1", "2", "3"])
+
+    def test_profile_session_requires_authenticated_user(self) -> None:
+        self.assertEqual(
+            _profile_session_username({"user": {"username": "DesignerBot"}}),
+            "DesignerBot",
+        )
+        self.assertIsNone(
+            _profile_session_username(
+                {"permissions": {"admin": False, "social": False}}
+            )
+        )
 
     def test_bot_reply_after_latest_user_means_no_target(self) -> None:
         root = FakeComment(
@@ -483,11 +496,11 @@ class ScratchClientThreadTests(unittest.TestCase):
             _json_profile_error([{"errors": ["comments have been turned off"]}]),
             "Scratch comments are disabled on this profile",
         )
-        unknown = _json_profile_error(["unexpected safe test error"])
-        self.assertRegex(
-            unknown,
-            r"unrecognized profile comment error \(text_length=26, sha256=[0-9a-f]{12}\)",
-        )
+        self.assertEqual(_json_profile_error([""]), "")
+        shape = _json_profile_response_shape(["", {"errors": ["mystery"]}])
+        self.assertIn("str(len=0", shape)
+        self.assertIn("known_keys=errors", shape)
+        self.assertNotIn("mystery", shape)
 
     def test_profile_reply_still_rejects_unverified_success_without_id(self) -> None:
         class RawProfileComment:
