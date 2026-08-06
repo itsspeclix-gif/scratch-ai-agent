@@ -19,6 +19,20 @@ PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
 
 
+def _session_headers(session: Any) -> dict[str, str]:
+    headers = getattr(session, "_headers", None)
+    if isinstance(headers, dict):
+        return headers
+    return {}
+
+
+def _session_cookies(session: Any) -> dict[str, str]:
+    cookies = getattr(session, "_cookies", None)
+    if isinstance(cookies, dict):
+        return cookies
+    return {}
+
+
 def _strip_leading_author_mentions(text: str, author: str) -> str:
     mention = re.compile(
         rf"^(?:\s*@{re.escape(author)}(?![A-Za-z0-9_-])[\s,:;.!?-]*)+",
@@ -428,7 +442,16 @@ class ScratchClient:
 
     def _notification_targets(self) -> list[CommentRef]:
         self._notification_scan_complete = True
-        self._unread_message_count = int(self._session.message_count())
+        try:
+            self._unread_message_count = self._message_count()
+        except Exception as exc:
+            self._notification_scan_complete = False
+            self._unread_message_count = 0
+            logger.warning(
+                "failed checking Scratch notifications; skipping this run: %r",
+                exc,
+            )
+            return []
         if self._unread_message_count <= 0:
             return []
 
@@ -454,6 +477,26 @@ class ScratchClient:
                     getattr(message, "comment_id", "unknown"),
                 )
         return result
+
+    def _message_count(self) -> int:
+        username = self._settings.scratch_username
+        headers = _session_headers(self._session)
+        cookies = _session_cookies(self._session)
+        if not getattr(self._session, "_username", None) or (
+            not headers and not cookies
+        ):
+            return int(self._session.message_count())
+        response = requests.get(
+            f"https://api.scratch.mit.edu/users/{username}/messages/count",
+            headers=headers,
+            cookies=cookies,
+            timeout=10,
+        )
+        if response.ok:
+            data = response.json()
+            if "count" in data:
+                return int(data["count"])
+        return int(self._session.message_count())
 
     def _full_scan_due(self) -> bool:
         if not self._settings.full_scan_enabled:
@@ -551,7 +594,16 @@ class ScratchClient:
                 self._unread_message_count,
             )
             return
-        current_count = int(self._session.message_count())
+        try:
+            current_count = self._message_count()
+        except Exception as exc:
+            logger.warning(
+                "failed checking Scratch notification count; leaving %d "
+                "Scratch notifications unread for retry: %r",
+                self._unread_message_count,
+                exc,
+            )
+            return
         if current_count != self._unread_message_count:
             logger.info(
                 "notification count changed from %d to %d; deferring clear",
@@ -559,7 +611,16 @@ class ScratchClient:
                 current_count,
             )
             return
-        self._session.clear_messages()
+        try:
+            self._session.clear_messages()
+        except Exception as exc:
+            logger.warning(
+                "failed clearing %d Scratch notifications; leaving them "
+                "unread for retry: %r",
+                self._unread_message_count,
+                exc,
+            )
+            return
         logger.info(
             "marked %d Scratch notifications as read",
             self._unread_message_count,

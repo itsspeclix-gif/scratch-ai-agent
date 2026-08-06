@@ -324,9 +324,11 @@ def run_once(
     if settings.bot_mode == "private":
         try:
             scratch.finish_notification_batch(success=stats.errors == 0)
-        except Exception:
-            stats.errors += 1
-            logger.exception("failed marking Scratch notifications as read")
+        except Exception as exc:
+            logger.warning(
+                "failed marking Scratch notifications as read; continuing: %r",
+                exc,
+            )
 
     if settings.outreach_enabled and settings.outreach_users:
         try:

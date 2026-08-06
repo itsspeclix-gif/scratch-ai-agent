@@ -22,6 +22,7 @@ class FakeScratch:
         self.notification_results: list[bool] = []
         self.outreach_user: str | None = None
         self.outreach_posts: list[tuple[str, str]] = []
+        self.raise_on_finish = False
 
     def conversation_targets(self) -> list[CommentRef]:
         return [comment for comment in self.comments if comment.id in self.current_ids]
@@ -51,6 +52,8 @@ class FakeScratch:
 
     def finish_notification_batch(self, success: bool) -> None:
         self.notification_results.append(success)
+        if self.raise_on_finish:
+            raise RuntimeError("Scratch mail clear failed")
 
     def outreach_candidate(self) -> str | None:
         return self.outreach_user
@@ -146,6 +149,22 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(second.posted, 0)
         self.assertEqual(scratch.posted, [("3", "Safe response.")])
         self.assertEqual(scratch.notification_results, [True, True])
+
+    def test_notification_cleanup_failure_does_not_fail_run(self) -> None:
+        comment = CommentRef("1", "Tester", "Hello", None, object(), root_id="1")
+        scratch = FakeScratch([comment])
+        scratch.raise_on_finish = True
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.errors, 0)
+        self.assertEqual(scratch.posted, [("1", "Safe response.")])
+        self.assertEqual(scratch.notification_results, [True])
 
     def test_recheck_blocks_post_when_thread_changes(self) -> None:
         comment = CommentRef("1", "Tester", "Hello", None, object(), root_id="1")

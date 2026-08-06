@@ -414,11 +414,13 @@ class FakeSession:
             for project_id, project in (projects or {}).items()
         }
         self.cleared = 0
+        self.message_limits: list[int] = []
 
     def message_count(self) -> int:
         return len(self._messages)
 
     def messages(self, *, limit: int) -> list[object]:
+        self.message_limits.append(limit)
         return self._messages[:limit]
 
     def clear_messages(self) -> None:
@@ -432,6 +434,80 @@ class FakeSession:
 
 
 class ScratchClientDiscoveryTests(unittest.TestCase):
+    def test_notification_count_endpoint_sets_message_fetch_limit(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        messages = [
+            SimpleNamespace(comment_id="1"),
+            SimpleNamespace(comment_id="2"),
+            SimpleNamespace(comment_id="3"),
+        ]
+        session = FakeSession(messages)
+        session._username = "Bot"  # type: ignore[attr-defined]
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+
+        class CountResponse:
+            ok = True
+
+            def json(self) -> dict[str, int]:
+                return {"count": 2}
+
+        def target(message: object) -> CommentRef:
+            comment_id = str(getattr(message, "comment_id"))
+            return CommentRef(comment_id, "Tester", "Hi", None, object())
+
+        with (
+            patch("app.scratch_client.requests.get", return_value=CountResponse()),
+            patch.object(client, "_full_scan_due", return_value=False),
+            patch.object(client, "_notification_target", side_effect=target),
+        ):
+            targets = client.conversation_targets()
+
+        self.assertEqual(session.message_limits, [2])
+        self.assertEqual({target.id for target in targets}, {"1", "2"})
+
+    def test_notification_count_failure_skips_run(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake",
+            groq_model="llama-3.1-8b-instant",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="private",
+            max_reply_chars=500,
+            persona="Test",
+        )
+        session = FakeSession([object()])
+        session._username = "Bot"  # type: ignore[attr-defined]
+        client = ScratchClient.__new__(ScratchClient)
+        client._settings = settings
+        client._session = session
+
+        with (
+            patch(
+                "app.scratch_client.requests.get",
+                side_effect=RuntimeError("Scratch auth failed"),
+            ),
+            patch.object(client, "_full_scan_due", return_value=False),
+        ):
+            targets = client.conversation_targets()
+
+        self.assertEqual(targets, [])
+        self.assertFalse(client._notification_scan_complete)
+        self.assertEqual(client._unread_message_count, 0)
+
     def test_full_scan_is_disabled_by_default(self) -> None:
         settings = Settings(
             scratch_username="Bot",
@@ -796,9 +872,43 @@ class ScratchClientDiscoveryTests(unittest.TestCase):
         client._notification_scan_complete = True
         session._messages.append(object())
 
-        client.finish_notification_batch(success=True)
+        with patch.object(client, "_message_count", return_value=2):
+            client.finish_notification_batch(success=True)
 
         self.assertEqual(session.cleared, 0)
+
+    def test_notification_clear_failure_is_retryable(self) -> None:
+        session = FakeSession([object()])
+
+        def fail_clear() -> None:
+            raise RuntimeError("Scratch returned non-JSON")
+
+        session.clear_messages = fail_clear  # type: ignore[method-assign]
+        client = ScratchClient.__new__(ScratchClient)
+        client._session = session
+        client._unread_message_count = 1
+        client._notification_scan_complete = True
+
+        with patch.object(client, "_message_count", return_value=1):
+            client.finish_notification_batch(success=True)
+
+        self.assertEqual(client._unread_message_count, 1)
+
+    def test_notification_count_failure_is_retryable(self) -> None:
+        session = FakeSession([object()])
+        client = ScratchClient.__new__(ScratchClient)
+        client._session = session
+        client._unread_message_count = 1
+        client._notification_scan_complete = True
+
+        with patch.object(
+            client,
+            "_message_count",
+            side_effect=RuntimeError("Scratch returned non-JSON"),
+        ):
+            client.finish_notification_batch(success=True)
+
+        self.assertEqual(client._unread_message_count, 1)
 
     def test_outreach_posts_without_following(self) -> None:
         events: list[str] = []
