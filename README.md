@@ -30,7 +30,8 @@ With those values, a scheduled GitHub run checks Scratch and posts eligible repl
 
 The recommended free scheduler is the Cloudflare Worker in
 `cloudflare-scheduler`. It uses a Cloudflare Cron Trigger to call GitHub's
-`workflow_dispatch` API every minute, bypassing GitHub's delayed
+workflow status API every minute and calls `workflow_dispatch` only when no
+run is already queued or executing, bypassing GitHub's delayed
 scheduled-event queue without moving the Python bot or its Scratch and Groq
 secrets out of GitHub.
 

@@ -1,7 +1,9 @@
 # Cloudflare scheduler
 
-This Worker triggers the GitHub Actions workflow every minute. The
-Scratch agent and its existing secrets continue to run inside GitHub Actions.
+This Worker checks the GitHub Actions workflow every minute. It dispatches a new
+run only when the workflow has no queued, requested, waiting, pending, or
+in-progress run. The Scratch agent and its existing secrets continue to run
+inside GitHub Actions.
 
 ## 1. Create a restricted GitHub token
 
@@ -34,7 +36,9 @@ Copy the token when GitHub displays it. Never put it in this repository.
    `* * * * *`
 
 Cron Triggers use UTC, but this expression runs every minute in every
-time zone.
+time zone. The one-minute check is the default. When a run is already active,
+that minute is logged as `github_workflow_dispatch_skipped`; the next minute
+checks again instead of creating another queued run.
 
 ## 3. Test the dispatch
 

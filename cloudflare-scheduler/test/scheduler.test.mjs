@@ -17,25 +17,81 @@ test("dispatches the configured GitHub workflow", async (t) => {
     globalThis.fetch = originalFetch;
   });
 
-  let request;
+  const requests = [];
   globalThis.fetch = async (url, options) => {
-    request = { url, options };
+    const request = { url: String(url), options: options ?? {} };
+    requests.push(request);
+    if (request.options.method !== "POST") {
+      return Response.json({ workflow_runs: [] });
+    }
     return new Response(null, { status: 204 });
   };
 
-  await triggerWorkflow(env);
+  const result = await triggerWorkflow(env);
 
   assert.equal(
-    request.url,
+    requests[0].url,
+    "https://api.github.com/repos/itsspeclix-gif/scratch-ai-agent/" +
+      "actions/workflows/scratch-agent.yml/runs?" +
+      "branch=main&exclude_pull_requests=true&per_page=20",
+  );
+  assert.equal(requests[0].options.method, undefined);
+  assert.equal(
+    requests[1].url,
     "https://api.github.com/repos/itsspeclix-gif/scratch-ai-agent/" +
       "actions/workflows/scratch-agent.yml/dispatches",
   );
-  assert.equal(request.options.method, "POST");
+  assert.equal(requests[1].options.method, "POST");
   assert.equal(
-    request.options.headers.Authorization,
+    requests[1].options.headers.Authorization,
     "Bearer github_pat_test_only",
   );
-  assert.deepEqual(JSON.parse(request.options.body), { ref: "main" });
+  assert.deepEqual(JSON.parse(requests[1].options.body), { ref: "main" });
+  assert.equal(result.event, "github_workflow_dispatched");
+});
+
+test("does not dispatch while the workflow is queued or running", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return Response.json({
+      workflow_runs: [
+        { id: 123, run_number: 17061, status: "in_progress" },
+      ],
+    });
+  };
+
+  const result = await triggerWorkflow(env);
+
+  assert.equal(requestCount, 1);
+  assert.equal(result.event, "github_workflow_dispatch_skipped");
+  assert.equal(result.reason, "workflow_already_active");
+  assert.equal(result.runId, 123);
+  assert.equal(result.runStatus, "in_progress");
+});
+
+test("fails closed when the workflow status cannot be checked", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response(null, { status: 503 });
+  };
+
+  await assert.rejects(
+    triggerWorkflow(env),
+    /status check failed with 503/,
+  );
+  assert.equal(requestCount, 1);
 });
 
 test("scheduled handler registers the dispatch promise", async (t) => {
@@ -43,7 +99,12 @@ test("scheduled handler registers the dispatch promise", async (t) => {
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
-  globalThis.fetch = async () => new Response(null, { status: 204 });
+  globalThis.fetch = async (_url, options = {}) => {
+    if (options.method !== "POST") {
+      return Response.json({ workflow_runs: [] });
+    }
+    return new Response(null, { status: 204 });
+  };
 
   let scheduledWork;
   scheduler.scheduled({}, env, {
