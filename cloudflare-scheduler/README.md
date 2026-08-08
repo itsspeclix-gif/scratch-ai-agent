@@ -52,15 +52,13 @@ Worker's `Settings -> Trigger Events -> View events` screen.
 The Worker's `/health` route reports whether the deployment is reachable. It
 does not execute the agent or expose secrets.
 
-## 4. Disable GitHub's fallback schedule
+## 4. Keep the GitHub workflow dispatch-only
 
-Only after the Cloudflare test succeeds, create this GitHub Actions repository
-variable:
-
-`CLOUDFLARE_SCHEDULER_ENABLED=true`
-
-The native GitHub schedule will then skip its job. Manual runs and Cloudflare
-`workflow_dispatch` runs remain enabled.
+The repository's `.github/workflows/scratch-agent.yml` intentionally contains
+only `workflow_dispatch`. Do not add a native GitHub `schedule` trigger: it would
+create separate scheduled runs that compete with the one-minute Cloudflare
+dispatcher. Cloudflare and GitHub's **Run workflow** button both use the same
+dispatch path.
 
 ## Command-line deployment
 

@@ -17,27 +17,29 @@ Audience modes:
 
 ## Automatic GitHub replies
 
-The GitHub Actions workflow has a five-minute fallback schedule and can also be run manually. The schedule is offset from the start of each hour to reduce GitHub scheduler congestion. Automatic posting requires these repository variables:
+The GitHub Actions workflow is dispatch-only. It can be run from GitHub's
+**Run workflow** button, and the Cloudflare scheduler dispatches it automatically
+when the previous run has finished. Automatic posting requires these repository
+variables:
 
 ```text
 BOT_MODE=private
 AUDIENCE_MODE=everyone
 ```
 
-With those values, a scheduled GitHub run checks Scratch and posts eligible replies without your Mac being on. GitHub scheduled workflows are best-effort: runs can be delayed or dropped during periods of high load, so GitHub Actions cannot guarantee an exact five-minute response interval.
+With those values, each dispatched GitHub run checks Scratch and posts eligible
+replies without your Mac being on.
 
 ## Reliable one-minute scheduling
 
 The recommended free scheduler is the Cloudflare Worker in
 `cloudflare-scheduler`. It uses a Cloudflare Cron Trigger to call GitHub's
 workflow status API every minute and calls `workflow_dispatch` only when no
-run is already queued or executing, bypassing GitHub's delayed
-scheduled-event queue without moving the Python bot or its Scratch and Groq
-secrets out of GitHub.
+dispatch run is already queued or executing. The Python bot and its Scratch and
+AI-provider secrets remain inside GitHub.
 
 Follow `cloudflare-scheduler/README.md` to create a repository-scoped GitHub
-token, deploy the Worker, test one dispatch, and disable the native GitHub
-schedule. Keep `CLOUDFLARE_SCHEDULER_ENABLED` unset until that test succeeds.
+token, deploy the Worker, and test one dispatch.
 
 ## Notification-driven conversations
 

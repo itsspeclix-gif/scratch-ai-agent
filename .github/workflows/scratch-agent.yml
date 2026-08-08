@@ -2,20 +2,18 @@ name: Scratch AI agent
 
 on:
   workflow_dispatch:
-  schedule:
-    # Offset from the busiest start-of-hour window to reduce scheduler delays.
-    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: scratch-ai-agent
+  # This new group avoids being blocked by pending runs created by the removed
+  # native schedule under the old scratch-ai-agent concurrency group.
+  group: scratch-ai-agent-cloudflare
   cancel-in-progress: false
 
 jobs:
   run-agent:
-    if: github.event_name != 'schedule' || vars.CLOUDFLARE_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

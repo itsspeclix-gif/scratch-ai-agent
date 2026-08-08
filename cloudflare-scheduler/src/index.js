@@ -44,6 +44,7 @@ export async function activeWorkflowRun(env) {
   const token = required(env, "GITHUB_TOKEN");
   const query = new URLSearchParams({
     branch: ref,
+    event: "workflow_dispatch",
     exclude_pull_requests: "true",
     per_page: "20",
   });

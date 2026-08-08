@@ -33,7 +33,8 @@ test("dispatches the configured GitHub workflow", async (t) => {
     requests[0].url,
     "https://api.github.com/repos/itsspeclix-gif/scratch-ai-agent/" +
       "actions/workflows/scratch-agent.yml/runs?" +
-      "branch=main&exclude_pull_requests=true&per_page=20",
+      "branch=main&event=workflow_dispatch&" +
+      "exclude_pull_requests=true&per_page=20",
   );
   assert.equal(requests[0].options.method, undefined);
   assert.equal(
