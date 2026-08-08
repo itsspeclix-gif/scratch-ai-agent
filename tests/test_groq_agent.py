@@ -124,10 +124,57 @@ class GroqAgentTests(unittest.TestCase):
         self.assertNotIn("should_reply", system_prompt)
         transcript = http.payload["messages"][1]["content"]
         self.assertIn('"newest_message"', transcript)
+        self.assertIn('"pending_author_messages"', transcript)
         self.assertIn("How did you make it?", transcript)
         self.assertIn("I used clones.", transcript)
         self.assertIn("What about level two?", transcript)
         self.assertTrue(decision.should_reply)
+
+    def test_pending_action_messages_stop_at_previous_bot_reply(self) -> None:
+        settings = Settings(
+            scratch_username="Bot",
+            scratch_session_string="fake",
+            groq_api_key="fake-key",
+            groq_model="qwen/qwen3.6-27b",
+            allowed_users=frozenset(),
+            audience_mode="everyone",
+            bot_mode="simulate",
+            max_reply_chars=300,
+            persona="A test persona.",
+        )
+        http = FakeHTTPSession()
+        inspector = FakeLinkInspector()
+
+        ChatAgent(settings, http=http, link_inspector=inspector).generate(
+            CommentRef(
+                "4",
+                "Tester",
+                "Please?",
+                "1",
+                object(),
+                root_id="1",
+                thread=(
+                    ThreadTurn("1", "Tester", "Follow me"),
+                    ThreadTurn("2", "Bot", "What are you creating?"),
+                    ThreadTurn("3", "Tester", "Comment on my profile"),
+                    ThreadTurn("4", "Tester", "Please?"),
+                ),
+            )
+        )
+
+        transcript = http.payload["messages"][1]["content"]
+        turn_data = json.loads(transcript.rsplit("\n\n", 1)[1])
+        self.assertEqual(
+            turn_data["pending_author_messages"],
+            [
+                {"author": "Tester", "comment": "Comment on my profile"},
+                {"author": "Tester", "comment": "Please?"},
+            ],
+        )
+        self.assertEqual(
+            inspector.inputs,
+            ["Comment on my profile\nPlease?"],
+        )
 
     def test_user_link_preview_is_supplied_as_untrusted_context(self) -> None:
         settings = Settings(

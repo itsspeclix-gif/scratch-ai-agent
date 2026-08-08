@@ -4,7 +4,13 @@ import logging
 from typing import Protocol
 
 from app.config import Settings
-from app.models import AgentAction, AgentDecision, CommentRef, RunStats
+from app.models import (
+    AgentAction,
+    AgentDecision,
+    CommentRef,
+    RunStats,
+    pending_author_messages,
+)
 from app.policy import (
     check_incoming,
     check_reply,
@@ -52,10 +58,15 @@ class AgentProtocol(Protocol):
     ) -> AgentDecision: ...
 
 
-def _action_evidence_matches(action: AgentAction, newest_message: str) -> bool:
+def _action_evidence_matches(
+    action: AgentAction,
+    request_messages: tuple[str, ...],
+) -> bool:
     evidence = " ".join(action.evidence.casefold().split())
-    newest = " ".join(newest_message.casefold().split())
-    return bool(evidence) and evidence in newest
+    return bool(evidence) and any(
+        evidence in " ".join(message.casefold().split())
+        for message in request_messages
+    )
 
 
 def run_once(
@@ -107,14 +118,15 @@ def run_once(
                 logger.info("skip comment=%s agent_reason=%s", comment.id, decision.reason)
                 continue
 
+            request_messages = pending_author_messages(comment)
             actions: dict[str, AgentAction] = {}
             for action in decision.actions:
-                if _action_evidence_matches(action, comment.content):
+                if _action_evidence_matches(action, request_messages):
                     actions[action.type] = action
                 else:
                     logger.warning(
                         "ignore model action comment=%s action=%s reason=evidence "
-                        "not found in newest message",
+                        "not found in pending author messages",
                         comment.id,
                         action.type,
                     )
@@ -124,16 +136,32 @@ def run_once(
 
             profile_invitation = (
                 model_profile_invitation
-                or is_explicit_profile_invitation(comment.content)
+                or any(
+                    is_explicit_profile_invitation(message)
+                    for message in request_messages
+                )
             )
-            project_id = scratch_project_id(comment.content)
+            project_id = next(
+                (
+                    found
+                    for message in reversed(request_messages)
+                    if (found := scratch_project_id(message)) is not None
+                ),
+                None,
+            )
             project_invitation = bool(
                 (model_project_invitation and project_id is not None)
-                or is_explicit_project_invitation(comment.content)
+                or any(
+                    is_explicit_project_invitation(message)
+                    for message in request_messages
+                )
             )
             follow_request = (
                 model_follow_request
-                or is_explicit_follow_request(comment.content)
+                or any(
+                    is_explicit_follow_request(message)
+                    for message in request_messages
+                )
             )
             if model_project_invitation and project_id is None:
                 logger.warning(

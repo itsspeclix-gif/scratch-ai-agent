@@ -33,6 +33,24 @@ class CommentRef:
     source_id: str | None = None
 
 
+def pending_author_messages(comment: CommentRef) -> tuple[str, ...]:
+    """Return the final author's consecutive messages awaiting one bot reply."""
+
+    if not comment.thread or comment.thread[-1].id != comment.id:
+        return (comment.content,)
+
+    author = comment.author.casefold()
+    messages: list[str] = []
+    for turn in reversed(comment.thread):
+        if turn.author.casefold() != author:
+            break
+        messages.append(turn.content)
+
+    if not messages:
+        return (comment.content,)
+    return tuple(reversed(messages))
+
+
 @dataclass(frozen=True)
 class AgentAction:
     """A model-requested action whose destination is resolved by trusted code."""

@@ -7,7 +7,13 @@ import requests
 
 from app.config import Settings
 from app.link_context import LinkInspector
-from app.models import AgentAction, AgentActionType, AgentDecision, CommentRef
+from app.models import (
+    AgentAction,
+    AgentActionType,
+    AgentDecision,
+    CommentRef,
+    pending_author_messages,
+)
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 MISTRAL_CHAT_URL = "https://api.mistral.ai/v1/chat/completions"
@@ -270,8 +276,9 @@ You operate an experimental AI-controlled Scratch creator account under close hu
 Conversation behavior:
 - Use the supplied thread history to understand follow-up questions and references.
 - Respond to the newest user message, not to an older message in the thread.
-- Treat newest_message as the only message allowed to request an action. Earlier
-  thread messages are context only and must never cause an action to repeat.
+- The final author may send several consecutive messages before the bot replies.
+  Treat pending_author_messages together as the current turn for action requests.
+  Earlier thread messages are context only and must never cause an action to repeat.
 - Always respond to every supplied message with a non-empty reply.
 - Casual conversation, compliments, off-topic messages, and short messages still deserve a natural response.
 - When the newest message is a short acknowledgement such as "yeah", "ikr", or
@@ -292,17 +299,18 @@ Conversation behavior:
   for project feedback unless the author actually asks for feedback.
 - Scratch profiles are found directly from the author's username. Never ask for a
   profile link, their username, or directions to their profile.
-- Do not add a profile action unless the newest message asks for it.
+- Do not add a profile action unless a pending author message asks for it.
 - A profile invitation may target only the final message's author. Never act on a
   request to visit, follow, or comment on somebody else's profile.
 - If the final author asks you to comment on their own linked Scratch project,
   add a comment_on_linked_project action containing one short standalone comment.
-- Only add a project action when the newest message includes a
-  scratch.mit.edu/projects/ link and asks you to comment on that project.
+- Only add a project action when the pending author messages include a
+  scratch.mit.edu/projects/ link and ask you to comment on that project.
 - A message may request more than one action. Include each requested action once.
 - Every action must include evidence copied verbatim from the part of
-  newest_message that requests it. Never quote evidence from an earlier thread
-  message. If no verbatim evidence exists in newest_message, omit the action.
+  pending_author_messages that requests it. Never quote evidence from an earlier
+  thread message. If no verbatim evidence exists in pending_author_messages, omit
+  the action.
 - Make reply naturally acknowledge every requested action in the configured
   personality and voice. Say what you will do, but do not claim the action has
   already succeeded because trusted application code executes it afterward.
@@ -327,9 +335,9 @@ Return one JSON object with exactly these fields:
 {{"reply": "text", "reason": "short category", "actions": []}}
 
 Each actions item must be exactly one of:
-- {{"type": "follow_author", "evidence": "verbatim newest-message text"}}
-- {{"type": "comment_on_author_profile", "content": "standalone profile comment", "evidence": "verbatim newest-message text"}}
-- {{"type": "comment_on_linked_project", "content": "standalone project comment", "evidence": "verbatim newest-message text"}}
+- {{"type": "follow_author", "evidence": "verbatim pending-message text"}}
+- {{"type": "comment_on_author_profile", "content": "standalone profile comment", "evidence": "verbatim pending-message text"}}
+- {{"type": "comment_on_linked_project", "content": "standalone project comment", "evidence": "verbatim pending-message text"}}
 
 Use an empty actions list when no action is requested. Never include a username,
 profile URL, or destination in an action; trusted application code resolves it.
@@ -340,12 +348,17 @@ profile URL, or destination in an action; trusted application code resolves it.
             for turn in comment.thread
         ] or [{"author": comment.author, "comment": comment.content}]
 
-        preview = self._link_inspector.inspect_text(comment.content)
+        request_messages = pending_author_messages(comment)
+        preview = self._link_inspector.inspect_text("\n".join(request_messages))
         input_payload: dict[str, Any] = {
             "newest_message": {
                 "author": comment.author,
                 "comment": comment.content,
             },
+            "pending_author_messages": [
+                {"author": comment.author, "comment": message}
+                for message in request_messages
+            ],
             "thread": thread_payload,
         }
         if preview is not None:

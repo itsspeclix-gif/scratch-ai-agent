@@ -328,6 +328,82 @@ class RunnerTests(unittest.TestCase):
             [("3", "BB8 is close, so I don't have a confident pick yet.")],
         )
 
+    def test_actions_from_consecutive_unanswered_messages_are_executed(self) -> None:
+        comment = CommentRef(
+            "2",
+            "Tester",
+            'Ik the magic word "PLEASE"??',
+            "1",
+            object(),
+            root_id="1",
+            thread=(
+                ThreadTurn(
+                    "1",
+                    "Tester",
+                    "Comment on my profile and follow me cuz why not",
+                ),
+                ThreadTurn("2", "Tester", 'Ik the magic word "PLEASE"??'),
+            ),
+        )
+        scratch = FakeScratch([comment])
+        agent = StructuredActionAgent(
+            AgentAction(
+                "follow_author",
+                evidence="follow me",
+            ),
+            AgentAction(
+                "comment_on_author_profile",
+                content="What are you creating next?",
+                evidence="Comment on my profile",
+            ),
+            reply="Sure—I can do both.",
+        )
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            agent,
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "What are you creating next?")],
+        )
+
+    def test_explicit_actions_use_consecutive_unanswered_messages(self) -> None:
+        comment = CommentRef(
+            "2",
+            "Tester",
+            "Please?",
+            "1",
+            object(),
+            root_id="1",
+            thread=(
+                ThreadTurn("1", "Tester", "Comment on my profile and follow me"),
+                ThreadTurn("2", "Tester", "Please?"),
+            ),
+        )
+        scratch = FakeScratch([comment])
+
+        stats = run_once(
+            self.settings,
+            scratch,
+            FakeAgent(),
+            logging.getLogger("test"),
+        )
+
+        self.assertEqual(stats.follows_posted, 1)
+        self.assertEqual(stats.profile_invites_posted, 1)
+        self.assertEqual(scratch.followed_users, ["Tester"])
+        self.assertEqual(
+            scratch.profile_invitation_posts,
+            [("Tester", "What are you making in Scratch?")],
+        )
+
     def test_explicit_invitation_falls_back_when_model_omits_action(self) -> None:
         comment = CommentRef(
             "1",
